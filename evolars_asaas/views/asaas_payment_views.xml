@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <record id="view_asaas_payment_tree" model="ir.ui.view">
+    <field name="name">evolars.asaas.payment.tree</field>
+    <field name="model">evolars.asaas.payment</field>
+    <field name="arch" type="xml">
+      <tree decoration-success="state in ['received', 'confirmed']" decoration-warning="state == 'pending'" decoration-danger="state in ['overdue', 'cancelled']">
+        <field name="name"/>
+        <field name="partner_id"/>
+        <field name="amount"/>
+        <field name="billing_type"/>
+        <field name="due_date"/>
+        <field name="received_date"/>
+        <field name="last_invoice_viewed_date" optional="show"/>
+        <field name="notification_channel"/>
+        <field name="whatsapp_sent" widget="boolean_toggle" string="WhatsApp"/>
+        <field name="receipt_sent" widget="boolean_toggle" string="E-mail"/>
+        <field name="state" widget="badge" decoration-success="state in ['received', 'confirmed']" decoration-danger="state in ['overdue', 'cancelled']" decoration-warning="state == 'pending'"/>
+      </tree>
+    </field>
+  </record>
+
+  <record id="view_asaas_payment_search" model="ir.ui.view">
+    <field name="name">evolars.asaas.payment.search</field>
+    <field name="model">evolars.asaas.payment</field>
+    <field name="arch" type="xml">
+      <search string="Pesquisar Cobranças Asaas">
+        <field name="name" string="Cobrança / Referência"/>
+        <field name="partner_id"/>
+        <field name="asaas_payment_id"/>
+        <field name="invoice_id"/>
+        <separator/>
+        <filter string="Recebidos / Confirmados" name="filter_received" domain="[('state', 'in', ['received', 'confirmed'])]"/>
+        <filter string="Pendentes" name="filter_pending" domain="[('state', '=', 'pending')]"/>
+        <filter string="Vencidos" name="filter_overdue" domain="[('state', '=', 'overdue')]"/>
+        <filter string="WhatsApp Enviado" name="filter_whatsapp_sent" domain="[('whatsapp_sent', '=', True)]"/>
+        <filter string="Recibo Enviado" name="filter_receipt_sent" domain="[('receipt_sent', '=', True)]"/>
+        <group expand="0" string="Agrupar Por">
+          <filter string="Cliente" name="group_partner" context="{'group_by': 'partner_id'}"/>
+          <filter string="Status" name="group_state" context="{'group_by': 'state'}"/>
+          <filter string="Canal de Notificação" name="group_channel" context="{'group_by': 'notification_channel'}"/>
+          <filter string="Data de Vencimento" name="group_due_date" context="{'group_by': 'due_date:month'}"/>
+          <filter string="Forma de Pagamento" name="group_billing_type" context="{'group_by': 'billing_type'}"/>
+        </group>
+      </search>
+    </field>
+  </record>
+
+  <record id="view_asaas_payment_form" model="ir.ui.view">
+    <field name="name">evolars.asaas.payment.form</field>
+    <field name="model">evolars.asaas.payment</field>
+    <field name="arch" type="xml">
+      <form>
+        <header>
+          <field name="can_be_edited" invisible="1"/>
+          <field name="can_be_deleted" invisible="1"/>
+          <field name="can_be_refunded" invisible="1"/>
+          <button name="action_create_remote" type="object" string="Criar no Asaas" class="btn-primary" invisible="asaas_payment_id"/>
+          <button name="action_send_payment_notification" type="object" string="Notificar Cliente" class="btn-secondary" invisible="state not in ['pending', 'overdue'] or not asaas_payment_id"/>
+          <button name="action_send_receipt_notification" type="object" string="Enviar Recibo (Canais)" class="btn-secondary" invisible="state not in ['received', 'confirmed']"/>
+          <button name="action_update_remote" type="object" string="Atualizar no Asaas" class="btn-secondary" invisible="not can_be_edited"/>
+          <button name="action_sync_from_remote" type="object" string="Sincronizar" class="btn-secondary" invisible="not asaas_payment_id"/>
+          <button name="action_receive_in_cash" type="object" string="Receber em Dinheiro" class="btn-secondary" invisible="state not in ['pending', 'overdue'] or not asaas_payment_id"/>
+          <button name="action_open_refund_wizard" type="object" string="Estornar" class="btn-secondary" invisible="not can_be_refunded"/>
+          <button name="action_resend_notification" type="object" string="Reenviar Asaas" class="btn-secondary" invisible="state not in ['pending', 'overdue'] or not asaas_payment_id"/>
+          <button name="action_delete_remote" type="object" string="Cancelar no Asaas" class="btn-danger" invisible="not can_be_deleted"/>
+          <button name="action_open_invoice_url" type="object" string="Abrir no Asaas" invisible="not invoice_url"/>
+          <field name="state" widget="statusbar" statusbar_visible="draft,pending,received,confirmed,overdue,refunded,cancelled"/>
+        </header>
+        <sheet>
+          <div class="oe_title">
+            <label for="name" string="Cobrança"/>
+            <h1><field name="name"/></h1>
+          </div>
+          <group>
+            <group string="Dados da Cobrança">
+              <field name="partner_id" readonly="asaas_payment_id"/>
+              <field name="invoice_id" readonly="state in ['received', 'confirmed', 'refunded', 'cancelled']"/>
+              <field name="subscription_id" readonly="state in ['received', 'confirmed', 'refunded', 'cancelled']"/>
+              <field name="amount" readonly="state in ['received', 'confirmed', 'refunded', 'cancelled']"/>
+              <field name="currency_id" invisible="1"/>
+              <field name="due_date" readonly="state in ['received', 'confirmed', 'refunded', 'cancelled']"/>
+              <field name="billing_type" readonly="state in ['received', 'confirmed', 'refunded', 'cancelled']"/>
+            </group>
+            <group string="Integração &amp; Liquidação">
+              <field name="asaas_payment_id"/>
+              <field name="external_reference"/>
+              <field name="received_date"/>
+              <field name="last_invoice_viewed_date" invisible="not last_invoice_viewed_date"/>
+              <field name="last_bank_slip_viewed_date" invisible="not last_bank_slip_viewed_date"/>
+              <field name="account_payment_id"/>
+              <field name="split_move_id"/>
+              <field name="invoice_url" widget="url"/>
+              <field name="bank_slip_url" widget="url" invisible="not bank_slip_url"/>
+            </group>
+          </group>
+          <group string="Encargos &amp; Descontos">
+            <group>
+              <field name="fine_value" readonly="state in ['received', 'confirmed', 'refunded', 'cancelled']"/>
+              <field name="fine_type" readonly="state in ['received', 'confirmed', 'refunded', 'cancelled']"/>
+              <field name="interest_value" readonly="state in ['received', 'confirmed', 'refunded', 'cancelled']"/>
+            </group>
+            <group>
+              <field name="discount_value" readonly="state in ['received', 'confirmed', 'refunded', 'cancelled']"/>
+              <field name="discount_type" readonly="state in ['received', 'confirmed', 'refunded', 'cancelled']"/>
+              <field name="discount_due_date_limit_days" readonly="state in ['received', 'confirmed', 'refunded', 'cancelled']"/>
+              <field name="postal_service" readonly="state in ['received', 'confirmed', 'refunded', 'cancelled']"/>
+            </group>
+          </group>
+          <group string="Canais de Notificação &amp; Entregas">
+            <group string="Preferência de Canal">
+              <field name="notification_channel" readonly="state in ['received', 'confirmed', 'refunded', 'cancelled']"/>
+              <field name="last_notification_date"/>
+            </group>
+            <group string="Status de Envio">
+              <label for="whatsapp_sent" string="WhatsApp (Lydia)"/>
+              <div class="o_row">
+                <field name="whatsapp_sent" widget="boolean_toggle"/>
+                <span invisible="not whatsapp_sent" class="text-muted">(<field name="whatsapp_sent_date" class="oe_inline"/>)</span>
+              </div>
+              <field name="whatsapp_message_id" invisible="not whatsapp_sent"/>
+              <label for="receipt_sent" string="E-mail (Resend)"/>
+              <div class="o_row">
+                <field name="receipt_sent" widget="boolean_toggle"/>
+                <span invisible="not receipt_sent" class="text-muted">(<field name="receipt_sent_date" class="oe_inline"/>)</span>
+              </div>
+              <field name="resend_email_id" invisible="not receipt_sent"/>
+            </group>
+          </group>
+
+          <notebook>
+            <page string="Splits">
+              <field name="split_line_ids" readonly="state in ['received', 'confirmed', 'refunded', 'cancelled']">
+                <tree editable="bottom">
+                  <field name="sequence" widget="handle"/>
+                  <field name="name"/>
+                  <field name="wallet_id"/>
+                  <field name="split_type"/>
+                  <field name="amount" invisible="split_type != 'fixed'"/>
+                  <field name="percentage" invisible="split_type != 'percentage'"/>
+                  <field name="account_id"/>
+                </tree>
+              </field>
+            </page>
+            <page string="PIX" invisible="billing_type != 'PIX'">
+              <group>
+                <field name="pix_payload" readonly="1"/>
+                <field name="pix_qrcode_image" widget="image" class="oe_avatar" readonly="1" invisible="not pix_qrcode_image"/>
+              </group>
+            </page>
+            <page string="Boleto" invisible="billing_type != 'BOLETO'">
+              <group>
+                <field name="identification_field" readonly="1"/>
+              </group>
+            </page>
+            <page string="Eventos de Webhook">
+              <field name="webhook_event_ids" readonly="1">
+                <tree>
+                  <field name="event"/>
+                  <field name="external_event_id"/>
+                  <field name="received_at"/>
+                </tree>
+              </field>
+            </page>
+          </notebook>
+        </sheet>
+        <div class="oe_chatter">
+          <field name="message_follower_ids"/>
+          <field name="activity_ids"/>
+          <field name="message_ids"/>
+        </div>
+      </form>
+    </field>
+  </record>
+
+  <record id="action_asaas_payments" model="ir.actions.act_window">
+    <field name="name">Cobranças</field>
+    <field name="res_model">evolars.asaas.payment</field>
+    <field name="view_mode">tree,form</field>
+    <field name="search_view_id" ref="view_asaas_payment_search"/>
+    <field name="context">{'search_default_filter_pending': 1}</field>
+  </record>
+</odoo>

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+
+    <record id="payment_provider_asaas" model="payment.provider">
+        <field name="name">Asaas</field>
+        <field name="code">asaas</field>
+        <field name="redirect_form_view_id" ref="redirect_form"/>
+        <!-- O vínculo com os métodos é explícito: `_activate_default_pms` só ativa
+             entre os que já estão ligados aqui, e o hook de instalação não liga nada. -->
+        <field name="payment_method_ids" eval="[Command.set([
+            ref('payment.payment_method_pix'),
+            ref('payment.payment_method_boleto'),
+            ref('payment.payment_method_card'),
+        ])]"/>
+        <field name="state">disabled</field>
+        <field name="is_published" eval="False"/>
+        <field name="pending_msg" type="html">
+            <div>
+                <p>Cobrança gerada no Asaas.</p>
+                <p>
+                    Pagamento por Pix cai em minutos; boleto pode levar até 3 dias úteis
+                    para ser compensado. Assim que o Asaas confirmar, o pedido segue para
+                    separação e você recebe um e-mail.
+                </p>
+            </div>
+        </field>
+    </record>
+
+</odoo>

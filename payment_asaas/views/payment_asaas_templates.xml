@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- O Asaas gera uma URL própria por cobrança, então não há campos a postar:
+         o formulário só leva o comprador até a página dele. -->
+    <template id="redirect_form">
+        <form t-att-action="api_url" method="get">
+            <t t-foreach="url_params" t-as="param">
+                <input type="hidden" t-att-name="param" t-att-value="url_params[param]"/>
+            </t>
+        </form>
+    </template>
+
+</odoo>

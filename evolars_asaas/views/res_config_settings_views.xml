@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <record id="res_config_settings_view_form_asaas" model="ir.ui.view">
+    <field name="name">res.config.settings.view.form.asaas</field>
+    <field name="model">res.config.settings</field>
+    <field name="inherit_id" ref="base_setup.res_config_settings_view_form"/>
+    <field name="arch" type="xml">
+      <xpath expr="//form" position="inside">
+        <app string="Asaas" name="evolars_asaas" groups="evolars_asaas.group_asaas_user">
+          <block title="Integração Asaas">
+            <setting string="Ambiente e credenciais">
+              <div class="content-group">
+                <div class="row mt16">
+                  <label for="asaas_environment" class="col-lg-3 o_light_label"/>
+                  <field name="asaas_environment"/>
+                  <label for="asaas_api_key" class="col-lg-3 o_light_label"/>
+                  <field name="asaas_api_key" password="True"/>
+                </div>
+              </div>
+            </setting>
+            <setting string="Resend API (Disparo de Recibos)">
+              <div class="content-group">
+                <div class="row mt16">
+                  <label for="asaas_resend_api_key" class="col-lg-3 o_light_label"/>
+                  <field name="asaas_resend_api_key" password="True"/>
+                </div>
+                <div class="text-muted mt8">
+                  Chave do Resend para envio automático de recibos oficiais aos clientes após liquidação.
+                </div>
+              </div>
+            </setting>
+            <setting string="Webhook">
+              <div class="content-group">
+                <div class="row mt16">
+                  <label for="asaas_webhook_token" class="col-lg-3 o_light_label"/>
+                  <field name="asaas_webhook_token" password="True"/>
+                </div>
+                <div class="mt16">
+                  <button name="action_sync_asaas_webhook" type="object" string="Sincronizar no Asaas" class="btn btn-secondary btn-sm" icon="fa-refresh"/>
+                </div>
+                <div class="text-muted mt8">
+                  /evolars_asaas/webhook
+                </div>
+              </div>
+            </setting>
+            <setting string="Contabilização de recebimentos" help="Quando definido, recebimentos confirmados vinculados a uma fatura geram e conciliam um pagamento no diário selecionado.">
+              <field name="asaas_receivable_journal_id" domain="[('type', 'in', ('bank', 'cash'))]"/>
+            </setting>
+            <setting string="Canal de Notificação Padrão" help="Canal padrão (WhatsApp Lydia na Evolution e/ou E-mail via Resend) atribuído a novas cobranças e assinaturas.">
+              <field name="asaas_default_notification_channel"/>
+            </setting>
+          </block>
+
+        </app>
+      </xpath>
+    </field>
+  </record>
+</odoo>

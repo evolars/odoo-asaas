@@ -1,0 +1,26 @@
+{
+    "name": "Evolars Asaas",
+    "summary": "Cobranças, recebimentos, splits e assinaturas Asaas",
+    "version": "17.0.1.0.0",
+    "license": "AGPL-3",
+    "author": "Evolars LTDA",
+    "website": "https://evolars.com.br",
+    "depends": ["account", "asaas_base", "contract", "mail"],
+    "external_dependencies": {"python": ["requests"]},
+    "data": [
+        "security/evolars_asaas_security.xml",
+        "security/ir.model.access.csv",
+        "wizard/asaas_payment_refund_wizard_views.xml",
+        "wizard/asaas_bill_payment_wizard_views.xml",
+        "views/res_config_settings_views.xml",
+        "views/asaas_payment_views.xml",
+        "views/asaas_subscription_views.xml",
+        "views/contract_contract_views.xml",
+        "views/res_partner_views.xml",
+        "views/account_move_views.xml",
+        "views/asaas_menus.xml",
+    ],
+
+    "application": True,
+    "installable": True,
+}

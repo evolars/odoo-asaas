@@ -1,0 +1,15 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_asaas_payment_user,Cobranca Asaas usuario,model_evolars_asaas_payment,group_asaas_user,1,1,1,0
+access_asaas_payment_manager,Cobranca Asaas gestor,model_evolars_asaas_payment,group_asaas_manager,1,1,1,1
+access_asaas_split_user,Split Asaas usuario,model_evolars_asaas_split,group_asaas_user,1,1,1,0
+access_asaas_split_manager,Split Asaas gestor,model_evolars_asaas_split,group_asaas_manager,1,1,1,1
+access_asaas_subscription_user,Assinatura Asaas usuario,model_evolars_asaas_subscription,group_asaas_user,1,1,1,0
+access_asaas_subscription_manager,Assinatura Asaas gestor,model_evolars_asaas_subscription,group_asaas_manager,1,1,1,1
+access_asaas_subscription_split_user,Split assinatura Asaas usuario,model_evolars_asaas_subscription_split,group_asaas_user,1,1,1,0
+access_asaas_subscription_split_manager,Split assinatura Asaas gestor,model_evolars_asaas_subscription_split,group_asaas_manager,1,1,1,1
+access_asaas_event_user,Evento Asaas usuario,model_evolars_asaas_webhook_event,group_asaas_user,1,0,0,0
+access_asaas_event_manager,Evento Asaas gestor,model_evolars_asaas_webhook_event,group_asaas_manager,1,1,1,1
+access_asaas_refund_wizard_user,Estorno Asaas usuario,model_evolars_asaas_payment_refund_wizard,group_asaas_user,1,1,1,1
+access_asaas_refund_wizard_manager,Estorno Asaas gestor,model_evolars_asaas_payment_refund_wizard,group_asaas_manager,1,1,1,1
+access_asaas_bill_payment_wizard_user,Pagamento Fatura Asaas usuario,model_evolars_asaas_bill_payment_wizard,group_asaas_user,1,1,1,1
+access_asaas_bill_payment_wizard_manager,Pagamento Fatura Asaas gestor,model_evolars_asaas_bill_payment_wizard,group_asaas_manager,1,1,1,1

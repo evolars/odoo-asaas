@@ -1,0 +1,212 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <record id="view_asaas_subscription_tree" model="ir.ui.view">
+    <field name="name">evolars.asaas.subscription.tree</field>
+    <field name="model">evolars.asaas.subscription</field>
+    <field name="arch" type="xml">
+      <tree decoration-success="state == 'active'" decoration-muted="state in ('inactive', 'expired')">
+        <field name="name"/>
+        <field name="contract_id"/>
+        <field name="partner_id"/>
+        <field name="amount"/>
+        <field name="cycle"/>
+        <field name="term_type"/>
+        <field name="next_due_date"/>
+        <field name="notification_channel"/>
+        <field name="whatsapp_sent" widget="boolean_toggle" string="WhatsApp"/>
+        <field name="email_sent" widget="boolean_toggle" string="E-mail"/>
+        <field name="payment_count" string="Cobranças"/>
+        <field name="state" widget="badge" decoration-success="state == 'active'" decoration-danger="state == 'expired'" decoration-warning="state == 'inactive'"/>
+      </tree>
+    </field>
+  </record>
+
+  <record id="view_asaas_subscription_form" model="ir.ui.view">
+    <field name="name">evolars.asaas.subscription.form</field>
+    <field name="model">evolars.asaas.subscription</field>
+    <field name="arch" type="xml">
+      <form>
+        <header>
+          <button name="action_create_remote" type="object" string="Criar no Asaas" class="btn-primary" invisible="asaas_subscription_id"/>
+          <button name="action_send_subscription_notification" type="object" string="Notificar Cliente" class="btn-secondary" invisible="not asaas_subscription_id or state != 'active'"/>
+          <button name="action_update_remote" type="object" string="Atualizar no Asaas" class="btn-secondary" invisible="not asaas_subscription_id or state != 'active'"/>
+          <button name="action_inactivate_remote" type="object" string="Pausar" class="btn-secondary" invisible="not asaas_subscription_id or state != 'active'"/>
+          <button name="action_activate_remote" type="object" string="Reativar" class="btn-secondary" invisible="not asaas_subscription_id or state != 'inactive'"/>
+          <button name="action_sync_from_remote" type="object" string="Sincronizar" class="btn-secondary" invisible="not asaas_subscription_id"/>
+          <button name="action_sync_payments" type="object" string="Sincronizar Cobranças" class="btn-secondary" invisible="not asaas_subscription_id"/>
+          <button name="action_delete_remote" type="object" string="Cancelar no Asaas" class="btn-danger" invisible="not asaas_subscription_id or state == 'expired'"/>
+          <field name="state" widget="statusbar" statusbar_visible="draft,active,inactive,expired"/>
+        </header>
+        <sheet>
+          <div class="oe_button_box" name="button_box">
+            <button class="oe_stat_button" type="object" name="action_view_payments" icon="fa-money">
+              <field string="Cobranças" name="payment_count" widget="statinfo"/>
+            </button>
+          </div>
+          <div class="oe_title">
+            <label for="name" string="Assinatura Recorrente"/>
+            <h1><field name="name"/></h1>
+          </div>
+          <group>
+            <group string="Contrato e Cliente">
+              <field name="contract_id" readonly="asaas_subscription_id"/>
+              <field name="partner_id" readonly="asaas_subscription_id"/>
+              <field name="amount" readonly="state == 'expired'"/>
+              <field name="currency_id" invisible="1"/>
+              <field name="billing_type" readonly="state == 'expired'"/>
+              <field name="cycle" readonly="state == 'expired'"/>
+            </group>
+            <group string="Vigência e Asaas">
+              <field name="next_due_date" readonly="state == 'expired'"/>
+              <field name="term_type" readonly="state == 'expired'"/>
+              <field name="end_date" invisible="term_type != 'fixed'" readonly="state == 'expired'"/>
+              <field name="max_payments" invisible="term_type != 'fixed'" readonly="state == 'expired'"/>
+              <field name="asaas_subscription_id"/>
+            </group>
+          </group>
+          <group string="Encargos, Descontos &amp; Propagação">
+            <group>
+              <field name="fine_value" readonly="state == 'expired'"/>
+              <field name="fine_type" readonly="state == 'expired'"/>
+              <field name="interest_value" readonly="state == 'expired'"/>
+            </group>
+            <group>
+              <field name="discount_value" readonly="state == 'expired'"/>
+              <field name="discount_type" readonly="state == 'expired'"/>
+              <field name="discount_due_date_limit_days" readonly="state == 'expired'"/>
+              <field name="update_pending_payments" readonly="state == 'expired'"/>
+            </group>
+          </group>
+          <group string="Canais de Notificação &amp; Entregas">
+            <group string="Preferência de Canal">
+              <field name="notification_channel" readonly="state == 'expired'"/>
+              <field name="last_notification_date"/>
+            </group>
+            <group string="Status de Envio">
+              <label for="whatsapp_sent" string="WhatsApp (Lydia)"/>
+              <div class="o_row">
+                <field name="whatsapp_sent" widget="boolean_toggle"/>
+                <span invisible="not whatsapp_sent" class="text-muted">(<field name="whatsapp_sent_date" class="oe_inline"/>)</span>
+              </div>
+              <field name="whatsapp_message_id" invisible="not whatsapp_sent"/>
+              <label for="email_sent" string="E-mail (Resend)"/>
+              <div class="o_row">
+                <field name="email_sent" widget="boolean_toggle"/>
+                <span invisible="not email_sent" class="text-muted">(<field name="email_sent_date" class="oe_inline"/>)</span>
+              </div>
+              <field name="resend_email_id" invisible="not email_sent"/>
+            </group>
+          </group>
+
+          <notebook>
+            <page string="Splits">
+              <field name="split_line_ids" readonly="state == 'expired'">
+                <tree editable="bottom">
+                  <field name="sequence" widget="handle"/>
+                  <field name="name"/>
+                  <field name="wallet_id"/>
+                  <field name="split_type"/>
+                  <field name="amount" invisible="split_type != 'fixed'"/>
+                  <field name="percentage" invisible="split_type != 'percentage'"/>
+                </tree>
+              </field>
+            </page>
+            <page string="Cobranças Geradas">
+              <field name="payment_ids" readonly="1">
+                <tree decoration-success="state in ('received','confirmed')" decoration-warning="state == 'pending'" decoration-danger="state in ('overdue','cancelled')">
+                  <field name="name"/>
+                  <field name="partner_id"/>
+                  <field name="amount"/>
+                  <field name="due_date"/>
+                  <field name="billing_type"/>
+                  <field name="received_date"/>
+                  <field name="state" widget="badge"/>
+                </tree>
+              </field>
+            </page>
+          </notebook>
+        </sheet>
+        <div class="oe_chatter">
+          <field name="message_follower_ids"/>
+          <field name="activity_ids"/>
+          <field name="message_ids"/>
+        </div>
+      </form>
+    </field>
+  </record>
+
+  <record id="view_asaas_event_tree" model="ir.ui.view">
+    <field name="name">evolars.asaas.webhook.event.tree</field>
+    <field name="model">evolars.asaas.webhook.event</field>
+    <field name="arch" type="xml">
+      <tree create="false" edit="false" decoration-warning="not payment_id and not subscription_id">
+        <field name="received_at"/>
+        <field name="event"/>
+        <field name="external_event_id"/>
+        <field name="payment_id"/>
+        <field name="subscription_id"/>
+        <button name="action_reprocess" type="object" string="Reprocessar" icon="fa-repeat" class="btn-link"/>
+      </tree>
+    </field>
+  </record>
+
+  <record id="view_asaas_event_form" model="ir.ui.view">
+    <field name="name">evolars.asaas.webhook.event.form</field>
+    <field name="model">evolars.asaas.webhook.event</field>
+    <field name="arch" type="xml">
+      <form create="false" edit="false">
+        <header>
+          <button name="action_reprocess" type="object" string="Reprocessar Evento" class="btn-primary" icon="fa-repeat"/>
+        </header>
+        <sheet>
+          <group>
+            <group>
+              <field name="event"/>
+              <field name="external_event_id"/>
+              <field name="received_at"/>
+            </group>
+            <group>
+              <field name="payment_id"/>
+              <field name="subscription_id"/>
+              <field name="company_id"/>
+            </group>
+          </group>
+          <group string="Payload JSON">
+            <field name="payload" widget="text" nolabel="1"/>
+          </group>
+        </sheet>
+      </form>
+    </field>
+  </record>
+
+  <record id="view_asaas_event_search" model="ir.ui.view">
+    <field name="name">evolars.asaas.webhook.event.search</field>
+    <field name="model">evolars.asaas.webhook.event</field>
+    <field name="arch" type="xml">
+      <search string="Pesquisar Eventos">
+        <field name="external_event_id"/>
+        <field name="event"/>
+        <field name="payment_id"/>
+        <field name="subscription_id"/>
+        <filter string="Não Vinculados" name="unlinked" domain="[('payment_id', '=', False), ('subscription_id', '=', False)]"/>
+        <group expand="0" string="Agrupar Por">
+          <filter string="Tipo de Evento" name="group_event" context="{'group_by': 'event'}"/>
+          <filter string="Data" name="group_date" context="{'group_by': 'received_at:day'}"/>
+        </group>
+      </search>
+    </field>
+  </record>
+
+  <record id="action_asaas_subscriptions" model="ir.actions.act_window">
+    <field name="name">Assinaturas</field>
+    <field name="res_model">evolars.asaas.subscription</field>
+    <field name="view_mode">tree,form</field>
+  </record>
+
+  <record id="action_asaas_events" model="ir.actions.act_window">
+    <field name="name">Eventos de webhook</field>
+    <field name="res_model">evolars.asaas.webhook.event</field>
+    <field name="view_mode">tree,form</field>
+    <field name="search_view_id" ref="view_asaas_event_search"/>
+  </record>
+</odoo>

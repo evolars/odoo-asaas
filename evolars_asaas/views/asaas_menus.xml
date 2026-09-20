@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <menuitem id="menu_asaas_root" name="Asaas" sequence="70" groups="evolars_asaas.group_asaas_user"/>
+  <menuitem id="menu_asaas_payments" name="Cobranças" parent="menu_asaas_root" action="action_asaas_payments" sequence="10"/>
+  <menuitem id="menu_asaas_subscriptions" name="Assinaturas" parent="menu_asaas_root" action="action_asaas_subscriptions" sequence="20"/>
+  <menuitem id="menu_asaas_events" name="Eventos de webhook" parent="menu_asaas_root" action="action_asaas_events" sequence="30" groups="evolars_asaas.group_asaas_user"/>
+</odoo>

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <record id="view_asaas_payment_refund_wizard_form" model="ir.ui.view">
+    <field name="name">evolars.asaas.payment.refund.wizard.form</field>
+    <field name="model">evolars.asaas.payment.refund.wizard</field>
+    <field name="arch" type="xml">
+      <form string="Estornar Cobrança Asaas">
+        <group>
+          <field name="payment_id"/>
+          <field name="currency_id" invisible="1"/>
+          <field name="refund_type" widget="radio"/>
+          <field name="amount" invisible="refund_type != 'partial'"/>
+          <field name="description"/>
+        </group>
+        <footer>
+          <button name="action_confirm_refund" type="object" string="Confirmar Estorno" class="btn-danger"/>
+          <button string="Cancelar" class="btn-secondary" special="cancel"/>
+        </footer>
+      </form>
+    </field>
+  </record>
+</odoo>

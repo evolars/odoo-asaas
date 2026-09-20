@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <record id="view_move_form_inherit_asaas_bill" model="ir.ui.view">
+    <field name="name">account.move.form.inherit.asaas.bill</field>
+    <field name="model">account.move</field>
+    <field name="inherit_id" ref="account.view_move_form"/>
+    <field name="arch" type="xml">
+      <xpath expr="//header" position="inside">
+        <field name="can_pay_via_asaas" invisible="1"/>
+        <button name="action_pay_via_asaas"
+                type="object"
+                string="Pagar via PIX (Asaas)"
+                class="oe_highlight"
+                invisible="not can_pay_via_asaas"/>
+      </xpath>
+      <xpath expr="//page[@name='other_info']" position="after">
+        <page name="asaas_transfer_info" string="Transferência Asaas" invisible="move_type != 'in_invoice' or not asaas_transfer_id">
+          <group>
+            <group string="Dados da Transferência PIX">
+              <field name="asaas_transfer_id"/>
+              <field name="asaas_transfer_status"/>
+              <field name="asaas_end_to_end_id"/>
+              <field name="asaas_receipt_url" widget="url"/>
+            </group>
+          </group>
+        </page>
+      </xpath>
+    </field>
+  </record>
+</odoo>

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="payment_provider_form" model="ir.ui.view">
+        <field name="name">payment.provider.form.asaas</field>
+        <field name="model">payment.provider</field>
+        <field name="inherit_id" ref="payment.payment_provider_form"/>
+        <field name="arch" type="xml">
+            <group name="provider_credentials" position="inside">
+                <group invisible="code != 'asaas'">
+                    <field name="asaas_api_key" password="True"
+                           required="code == 'asaas' and state != 'disabled'"/>
+                    <div colspan="2" class="text-muted">
+                        O ambiente acompanha o estado acima: <b>Teste</b> fala com o Sandbox
+                        (<code>$aact_hmlg_…</code>) e <b>Ativado</b> com a produção
+                        (<code>$aact_prod_…</code>).
+                        <br/>
+                        Lembre de registrar o webhook em Configurações → Asaas: é ele que
+                        confirma o pagamento. Pix e boleto são pagos depois que o comprador
+                        já saiu do site.
+                    </div>
+                    <div colspan="2">
+                        <button name="action_asaas_test_connection" type="object"
+                                string="Testar conexão" class="btn-link ps-0" icon="fa-plug"/>
+                    </div>
+                </group>
+            </group>
+        </field>
+    </record>
+
+</odoo>

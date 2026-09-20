@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <record id="view_asaas_bill_payment_wizard_form" model="ir.ui.view">
+    <field name="name">evolars.asaas.bill.payment.wizard.form</field>
+    <field name="model">evolars.asaas.bill.payment.wizard</field>
+    <field name="arch" type="xml">
+      <form string="Pagar Fatura via PIX (Asaas)">
+        <group>
+          <group string="Dados da Fatura">
+            <field name="move_id" readonly="1" options="{'no_open': True}"/>
+            <field name="partner_id" readonly="1"/>
+            <field name="currency_id" invisible="1"/>
+            <field name="amount" widget="monetary" options="{'currency_field': 'currency_id'}"/>
+            <field name="asaas_balance" widget="monetary" options="{'currency_field': 'currency_id'}"/>
+          </group>
+          <group string="Dados do PIX (Asaas)">
+            <field name="pix_key"/>
+            <field name="pix_key_type"/>
+            <field name="description"/>
+            <field name="external_reference"/>
+          </group>
+        </group>
+        <footer>
+          <button name="action_confirm_payment" type="object" string="Confirmar e Transferir PIX" class="btn-primary" data-hotkey="q"/>
+          <button string="Cancelar" class="btn-secondary" special="cancel" data-hotkey="x"/>
+        </footer>
+      </form>
+    </field>
+  </record>
+</odoo>
