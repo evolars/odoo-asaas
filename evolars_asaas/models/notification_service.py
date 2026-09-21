@@ -43,7 +43,7 @@ class EvolarsNotificationService:
         return {
             "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
-            "User-Agent": "Evolars-FinOps/17.0",
+            "User-Agent": "Evolars-FinOps/18.0",
         }
 
     def _get_evolution_config(self):
@@ -124,7 +124,7 @@ class EvolarsNotificationService:
         headers = {
             "Content-Type": "application/json",
             "apikey": config["api_key"],
-            "User-Agent": "Evolars-FinOps/17.0",
+            "User-Agent": "Evolars-FinOps/18.0",
         }
         req = urllib.request.Request(endpoint, data=payload, headers=headers, method="POST")
         try:

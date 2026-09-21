@@ -20,7 +20,7 @@ DEFAULT_TIMEOUT = 30
 
 # O Asaas exige User-Agent em contas root criadas a partir de 13/06/2024; sem ele
 # a requisição é recusada. Ver https://docs.asaas.com/docs/autenticacao-1
-USER_AGENT = "Evolars-Odoo/17.0"
+USER_AGENT = "Evolars-Odoo/18.0"
 
 
 class AsaasError(UserError):

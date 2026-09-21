@@ -1,6 +1,6 @@
 # Odoo Asaas
 
-Integração do [Asaas](https://www.asaas.com) com Odoo 17, em módulos separados para poderem ser
+Integração do [Asaas](https://www.asaas.com) com Odoo 18, em módulos separados para poderem ser
 combinados conforme o cliente precisa.
 
 Propriedade da **Evolars LTDA**.
@@ -173,7 +173,7 @@ O repositório é privado; o `Dockerfile` do Doodba já recebe `GH_TOKEN` na eta
 
 ```bash
 docker run --rm --network <rede> -v "$PWD":/mnt/extra-addons:ro \
-  -e HOST=<db> -e USER=odoo -e PASSWORD=odoo odoo:17.0 \
+  -e HOST=<db> -e USER=odoo -e PASSWORD=odoo odoo:18.0 \
   odoo -d asaas_test --addons-path=/mnt/extra-addons,/usr/lib/python3/dist-packages/odoo/addons \
   -i asaas_base,payment_asaas --test-enable --test-tags /asaas_base,/payment_asaas \
   --stop-after-init --without-demo=all

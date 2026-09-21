@@ -44,7 +44,7 @@ class ResendReceiptAPI:
         return {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
-            "User-Agent": "Evolars-FinOps-Asaas/17.0",
+            "User-Agent": "Evolars-FinOps-Asaas/18.0",
         }
 
     def send_payment_receipt(self, payment):
