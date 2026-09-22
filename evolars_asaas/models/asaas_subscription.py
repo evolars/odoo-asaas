@@ -56,7 +56,10 @@ class AsaasSubscription(models.Model):
     company_id = fields.Many2one("res.company", required=True, default=lambda self: self.env.company, index=True)
 
 
-    _sql_constraints = [("asaas_subscription_company_unique", "unique(asaas_subscription_id, company_id)", "Esta assinatura Asaas já está cadastrada nesta empresa.")]
+    _asaas_subscription_company_unique = models.Constraint(
+        'unique(asaas_subscription_id, company_id)',
+        "Esta assinatura Asaas já está cadastrada nesta empresa.",
+    )
 
     def _compute_payment_count(self):
         for subscription in self:
@@ -89,7 +92,7 @@ class AsaasSubscription(models.Model):
             "type": "ir.actions.act_window",
             "name": _("Cobranças da Assinatura"),
             "res_model": "evolars.asaas.payment",
-            "view_mode": "tree,form",
+            "view_mode": "list,form",
             "domain": [("subscription_id", "=", self.id)],
             "context": {
                 "default_subscription_id": self.id,

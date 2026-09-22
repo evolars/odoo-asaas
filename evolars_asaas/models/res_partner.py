@@ -41,7 +41,7 @@ class ResPartner(models.Model):
             "type": "ir.actions.act_window",
             "name": "Cobranças Asaas",
             "res_model": "evolars.asaas.payment",
-            "view_mode": "tree,form",
+            "view_mode": "list,form",
             "domain": [("partner_id", "=", self.id)],
             "context": {"default_partner_id": self.id},
         }
@@ -52,7 +52,7 @@ class ResPartner(models.Model):
             "type": "ir.actions.act_window",
             "name": "Assinaturas Asaas",
             "res_model": "evolars.asaas.subscription",
-            "view_mode": "tree,form",
+            "view_mode": "list,form",
             "domain": [("partner_id", "=", self.id)],
             "context": {"default_partner_id": self.id},
         }

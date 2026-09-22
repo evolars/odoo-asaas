@@ -96,9 +96,10 @@ class AsaasPayment(models.Model):
     resend_email_id = fields.Char(readonly=True, copy=False, string="ID do E-mail Resend")
     company_id = fields.Many2one("res.company", required=True, default=lambda self: self.env.company, index=True)
 
-    _sql_constraints = [
-        ("asaas_payment_company_unique", "unique(asaas_payment_id, company_id)", "Esta cobrança Asaas já está cadastrada nesta empresa.")
-    ]
+    _asaas_payment_company_unique = models.Constraint(
+        'unique(asaas_payment_id, company_id)',
+        "Esta cobrança Asaas já está cadastrada nesta empresa.",
+    )
 
     @api.depends("state", "asaas_payment_id")
     def _compute_capabilities(self):
@@ -535,7 +536,10 @@ class AsaasWebhookEvent(models.Model):
     received_at = fields.Datetime(default=fields.Datetime.now, required=True)
     company_id = fields.Many2one("res.company", required=True, default=lambda self: self.env.company, index=True)
 
-    _sql_constraints = [("asaas_event_company_unique", "unique(external_event_id, company_id)", "Este evento Asaas já foi processado.")]
+    _asaas_event_company_unique = models.Constraint(
+        'unique(external_event_id, company_id)',
+        "Este evento Asaas já foi processado.",
+    )
 
     @api.model
     def _parse_iso_datetime(self, value):

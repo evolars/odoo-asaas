@@ -28,7 +28,7 @@ class ContractContract(models.Model):
             "type": "ir.actions.act_window",
             "name": "Assinaturas Asaas",
             "res_model": "evolars.asaas.subscription",
-            "view_mode": "tree,form",
+            "view_mode": "list,form",
             "domain": [("contract_id", "=", self.id)],
             "context": {
                 "default_contract_id": self.id,

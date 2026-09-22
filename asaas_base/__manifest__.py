@@ -1,6 +1,6 @@
 {
     "name": "Asaas - Base",
-    "version": "18.0.1.0.0",
+    "version": "19.0.1.0.0",
     "category": "Accounting/Payment",
     "summary": "Cliente da API Asaas v3, credenciais e recepção autenticada de webhooks",
     "description": """
