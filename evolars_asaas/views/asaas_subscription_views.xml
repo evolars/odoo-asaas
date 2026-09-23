@@ -185,7 +185,7 @@
         <field name="payment_id"/>
         <field name="subscription_id"/>
         <filter string="Não Vinculados" name="unlinked" domain="[('payment_id', '=', False), ('subscription_id', '=', False)]"/>
-        <group string="Agrupar Por">
+        <group>
           <filter string="Tipo de Evento" name="group_event" context="{'group_by': 'event'}"/>
           <filter string="Data" name="group_date" context="{'group_by': 'received_at:day'}"/>
         </group>
