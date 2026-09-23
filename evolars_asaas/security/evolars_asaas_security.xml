@@ -21,10 +21,6 @@
         <field name="implied_ids" eval="[(4, ref('group_asaas_user'))]"/>
     </record>
 
-    <!-- ADR-019: Concessão obrigatória de acesso universal para todos os usuários internos (base.group_user) -->
-    <record id="base.group_user" model="res.groups">
-        <field name="implied_ids" eval="[(4, ref('group_asaas_user'))]"/>
-    </record>
 
     <record id="rule_asaas_payment_company" model="ir.rule">
         <field name="name">Cobranças Asaas por empresa</field>
