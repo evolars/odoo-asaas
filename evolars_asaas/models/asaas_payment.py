@@ -442,7 +442,7 @@ class AsaasPayment(models.Model):
                     "currency_id": payment.currency_id.id,
                     "date": payment.received_date or fields.Date.context_today(self),
                     "journal_id": journal.id,
-                    "ref": "Asaas %s" % (payment.asaas_payment_id or payment.name),
+                    "memo": "Asaas %s" % (payment.asaas_payment_id or payment.name),
                 })
                 accounting_payment.action_post()
                 payment.account_payment_id = accounting_payment.id
