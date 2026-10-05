@@ -1,8 +1,10 @@
 import logging
+import re
 from datetime import timedelta
 
 from odoo import _, fields, models
 from odoo.exceptions import ValidationError
+from odoo.tools import consteq, hmac as hmac_tool
 
 from odoo.addons.asaas_base.models.asaas_client import AsaasError
 from odoo.addons.payment_asaas import const
@@ -12,6 +14,152 @@ _logger = logging.getLogger(__name__)
 
 class PaymentTransaction(models.Model):
     _inherit = "payment.transaction"
+
+    # O que o comprador precisa para pagar sem sair do site. Fica na transação para a
+    # página de confirmação (e quem voltar a ela) mostrar o mesmo Pix ou boleto.
+    asaas_pix_qr_code = fields.Text(string="QR Code Pix (base64)", copy=False, readonly=True)
+    asaas_pix_payload = fields.Char(string="Pix copia e cola", copy=False, readonly=True)
+    asaas_pix_expiration = fields.Char(string="Pix válido até", copy=False, readonly=True)
+    asaas_boleto_url = fields.Char(string="Boleto (PDF)", copy=False, readonly=True)
+    asaas_boleto_line = fields.Char(string="Linha digitável", copy=False, readonly=True)
+
+    def _get_specific_processing_values(self, processing_values):
+        """Token que autoriza o navegador a criar a cobrança desta transação.
+
+        No fluxo direto quem cria a cobrança é a rota `/payment/asaas/charge`,
+        chamada pelo navegador; o token prova que a chamada vem de quem abriu a
+        transação, sem expor a referência de outra compra.
+        """
+        res = super()._get_specific_processing_values(processing_values)
+        if self.provider_code != "asaas":
+            return res
+        return {"asaas_access_token": self._asaas_access_token()}
+
+    def _asaas_access_token(self):
+        # Não usa payment.utils.generate_access_token: ele exige requisição HTTP, e o
+        # token também é gerado no template da confirmação e nos testes.
+        self.ensure_one()
+        return hmac_tool(self.env(su=True), "payment_asaas", self.reference)
+
+    def _asaas_check_access_token(self, access_token):
+        self.ensure_one()
+        return bool(access_token) and consteq(access_token, self._asaas_access_token())
+
+    # ------------------------------------------------------------------ #
+    # Fluxo direto: Pix, boleto e cartão no próprio site                  #
+    # ------------------------------------------------------------------ #
+
+    def _asaas_create_direct_charge(self, card=None, remote_ip=None):
+        """Cria a cobrança no tipo do método escolhido e guarda como pagar.
+
+        Pix e boleto deixam a transação pendente com o QR Code ou a linha
+        digitável; cartão é cobrado na hora e já volta pago ou recusado. Os dados
+        do cartão passam direto para o Asaas: não são gravados nem vão para o log.
+        """
+        self.ensure_one()
+        if self.provider_reference:
+            # Duplo clique ou página recarregada: a cobrança já existe.
+            return
+        billing_type = const.BILLING_TYPE_MAPPING.get(self.payment_method_code)
+        if not billing_type:
+            raise ValidationError(_("Método de pagamento não aceito pelo Asaas."))
+
+        client = self.provider_id._asaas_get_client()
+        partner = self.partner_id
+        if not partner.vat:
+            raise ValidationError(_(
+                "Informe o CPF ou CNPJ de %s para pagar pelo Asaas.", partner.display_name
+            ))
+        customer_id = partner._asaas_ensure_customer(client)
+        payload = self._asaas_prepare_payment_payload(customer_id)
+        payload.pop("callback", None)  # ninguém sai do site, não há para onde voltar
+        payload["billingType"] = billing_type
+        if billing_type == "CREDIT_CARD":
+            payload.update(self._asaas_prepare_card_payload(card or {}, remote_ip))
+
+        try:
+            payment = client.create_payment(payload)
+        except AsaasError as error:
+            if billing_type == "CREDIT_CARD":
+                # Cartão recusado: a transação morre aqui e o comprador tenta de
+                # novo (outra transação), com a mensagem do Asaas na tela.
+                self._set_error(str(error.args[0]) if error.args else _("Cartão recusado."))
+            raise
+
+        self.provider_reference = payment["id"]
+        if billing_type == "PIX":
+            qr_code = client.get_pix_qrcode(payment["id"])
+            self.write({
+                "asaas_pix_qr_code": qr_code.get("encodedImage"),
+                "asaas_pix_payload": qr_code.get("payload"),
+                "asaas_pix_expiration": qr_code.get("expirationDate"),
+            })
+        elif billing_type == "BOLETO":
+            values = {"asaas_boleto_url": payment.get("bankSlipUrl")}
+            try:
+                values["asaas_boleto_line"] = client.get_identification_field(
+                    payment["id"]
+                ).get("identificationField")
+            except AsaasError:
+                # A linha digitável às vezes demora a ficar pronta; o PDF basta.
+                _logger.info("Asaas: linha digitável ainda indisponível em %s.", self.reference)
+            self.write(values)
+        self._handle_notification_data("asaas", payment)
+
+    def _asaas_prepare_card_payload(self, card, remote_ip):
+        """Corpo do cartão e do titular para a cobrança `CREDIT_CARD`."""
+        self.ensure_one()
+        digits = lambda value: re.sub(r"\D", "", value or "")
+        number = digits(card.get("number"))
+        month, _sep, year = (card.get("expiry") or "").partition("/")
+        month, year = digits(month), digits(year)
+        if len(year) == 2:
+            year = "20" + year
+        holder_name = (card.get("holder") or "").strip()
+        cvv = digits(card.get("cvv"))
+        if not (number and holder_name and len(month) in (1, 2) and len(year) == 4 and cvv):
+            raise ValidationError(_("Confira os dados do cartão: número, nome, validade e CVV."))
+
+        partner = self.partner_id
+        document = digits(card.get("holder_document")) or digits(
+            partner.cnpj_cpf_stripped if "cnpj_cpf_stripped" in partner._fields else partner.vat
+        ) or digits(partner.vat)
+        return {
+            "creditCard": {
+                "holderName": holder_name,
+                "number": number,
+                "expiryMonth": month.zfill(2),
+                "expiryYear": year,
+                "ccv": cvv,
+            },
+            "creditCardHolderInfo": {
+                "name": holder_name,
+                "email": partner.email or "",
+                "cpfCnpj": document,
+                "postalCode": digits(partner.zip),
+                "addressNumber": self._asaas_address_number(partner),
+                "addressComplement": partner.street2 or None,
+                "phone": digits(partner.phone or partner.mobile),
+            },
+            "remoteIp": remote_ip or None,
+        }
+
+    def _asaas_sync_from_api(self):
+        """Busca a situação da cobrança no Asaas, sem esperar o webhook."""
+        self.ensure_one()
+        if not self.provider_reference:
+            return
+        payment = self.provider_id._asaas_get_client().get_payment(self.provider_reference)
+        self._handle_notification_data("asaas", payment)
+
+    @staticmethod
+    def _asaas_address_number(partner):
+        """Número do endereço, que o Asaas exige do titular do cartão."""
+        number = partner.street_number if "street_number" in partner._fields else False
+        if not number:
+            match = re.search(r"\b(\d+)\b", partner.street or "")
+            number = match.group(1) if match else "S/N"
+        return number
 
     def _get_specific_rendering_values(self, processing_values):
         """Cria a cobrança no Asaas e devolve para onde mandar o comprador."""

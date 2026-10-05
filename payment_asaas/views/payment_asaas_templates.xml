@@ -2,13 +2,120 @@
 <odoo>
 
     <!-- O Asaas gera uma URL própria por cobrança, então não há campos a postar:
-         o formulário só leva o comprador até a página dele. -->
+         o formulário só leva o comprador até a página dele. Usado só no fluxo de
+         redirecionamento; o checkout do site é transparente (inline_form). -->
     <template id="redirect_form">
         <form t-att-action="api_url" method="get">
             <t t-foreach="url_params" t-as="param">
                 <input type="hidden" t-att-name="param" t-att-value="url_params[param]"/>
             </t>
         </form>
+    </template>
+
+    <!-- Formulário dentro do checkout. Chamado uma vez por método (Pix, boleto,
+         cartão) com `pm_sudo` do método; só o cartão pede dados. -->
+    <template id="inline_form">
+        <t t-set="asaas_pm_code" t-value="pm_sudo and pm_sudo.code"/>
+        <div t-if="asaas_pm_code == 'card'" class="o_asaas_card_form mt-2"
+             t-att-data-provider-id="provider_id">
+            <div class="row g-2">
+                <div class="col-12">
+                    <label class="form-label small mb-1" t-attf-for="o_asaas_card_number_{{provider_id}}">Número do cartão</label>
+                    <input type="text" name="asaas_card_number" class="form-control"
+                           t-attf-id="o_asaas_card_number_{{provider_id}}"
+                           inputmode="numeric" autocomplete="cc-number" maxlength="23"
+                           placeholder="0000 0000 0000 0000"/>
+                </div>
+                <div class="col-12">
+                    <label class="form-label small mb-1" t-attf-for="o_asaas_card_holder_{{provider_id}}">Nome impresso no cartão</label>
+                    <input type="text" name="asaas_card_holder" class="form-control"
+                           t-attf-id="o_asaas_card_holder_{{provider_id}}"
+                           autocomplete="cc-name" maxlength="100"/>
+                </div>
+                <div class="col-6">
+                    <label class="form-label small mb-1" t-attf-for="o_asaas_card_expiry_{{provider_id}}">Validade</label>
+                    <input type="text" name="asaas_card_expiry" class="form-control"
+                           t-attf-id="o_asaas_card_expiry_{{provider_id}}"
+                           inputmode="numeric" autocomplete="cc-exp" maxlength="7"
+                           placeholder="MM/AA"/>
+                </div>
+                <div class="col-6">
+                    <label class="form-label small mb-1" t-attf-for="o_asaas_card_cvv_{{provider_id}}">CVV</label>
+                    <input type="text" name="asaas_card_cvv" class="form-control"
+                           t-attf-id="o_asaas_card_cvv_{{provider_id}}"
+                           inputmode="numeric" autocomplete="cc-csc" maxlength="4"
+                           placeholder="123"/>
+                </div>
+                <div class="col-12">
+                    <label class="form-label small mb-1" t-attf-for="o_asaas_card_document_{{provider_id}}">CPF/CNPJ do titular <span class="text-muted">(se não for o seu)</span></label>
+                    <input type="text" name="asaas_card_document" class="form-control"
+                           t-attf-id="o_asaas_card_document_{{provider_id}}"
+                           inputmode="numeric" maxlength="18"/>
+                </div>
+            </div>
+            <p class="small text-muted mt-2 mb-0">
+                Pagamento processado pelo Asaas. Os dados do cartão não ficam guardados na loja.
+            </p>
+        </div>
+        <p t-elif="asaas_pm_code == 'pix'" class="small text-muted mt-2 mb-0">
+            O QR Code e o código Pix aparecem na próxima tela. A confirmação chega em instantes.
+        </p>
+        <p t-elif="asaas_pm_code == 'boleto'" class="small text-muted mt-2 mb-0">
+            O boleto aparece na próxima tela para imprimir ou copiar a linha digitável.
+            A compensação leva até 3 dias úteis.
+        </p>
+    </template>
+
+    <!-- Como pagar uma transação pendente: QR Code do Pix ou boleto. Chamado na
+         página de confirmação do pedido com `tx`. -->
+    <template id="transaction_instructions">
+        <div t-if="tx and tx.provider_code == 'asaas' and tx.state == 'pending'"
+             class="o_asaas_instructions card mt-3"
+             t-att-data-reference="tx.reference"
+             t-att-data-access-token="tx._asaas_access_token()">
+            <div class="card-body">
+                <t t-if="tx.asaas_pix_payload">
+                    <h5 class="card-title">Pague com Pix</h5>
+                    <p class="mb-3">
+                        No app do seu banco, escolha Pix e leia o QR Code ou use o
+                        código "copia e cola".
+                    </p>
+                    <div class="text-center mb-3" t-if="tx.asaas_pix_qr_code">
+                        <img t-att-src="'data:image/png;base64,%s' % tx.asaas_pix_qr_code"
+                             alt="QR Code Pix" width="220" height="220" class="img-fluid"/>
+                    </div>
+                    <div class="input-group mb-2">
+                        <input type="text" readonly="readonly" class="form-control"
+                               t-att-value="tx.asaas_pix_payload" aria-label="Código Pix copia e cola"/>
+                        <button type="button" class="btn btn-primary o_asaas_copy"
+                                t-att-data-copy="tx.asaas_pix_payload">Copiar código</button>
+                    </div>
+                    <p t-if="tx.asaas_pix_expiration" class="small text-muted mb-0">
+                        Válido até <t t-out="tx.asaas_pix_expiration"/>.
+                    </p>
+                </t>
+                <t t-elif="tx.asaas_boleto_url or tx.asaas_boleto_line">
+                    <h5 class="card-title">Pague o boleto</h5>
+                    <div t-if="tx.asaas_boleto_line" class="input-group mb-2">
+                        <input type="text" readonly="readonly" class="form-control"
+                               t-att-value="tx.asaas_boleto_line" aria-label="Linha digitável"/>
+                        <button type="button" class="btn btn-primary o_asaas_copy"
+                                t-att-data-copy="tx.asaas_boleto_line">Copiar linha</button>
+                    </div>
+                    <a t-if="tx.asaas_boleto_url" t-att-href="tx.asaas_boleto_url"
+                       target="_blank" rel="noopener" class="btn btn-outline-primary">
+                        Abrir boleto (PDF)
+                    </a>
+                    <p class="small text-muted mt-2 mb-0">
+                        A compensação leva até 3 dias úteis. Avisamos por e-mail quando cair.
+                    </p>
+                </t>
+                <p class="o_asaas_waiting small mt-3 mb-0">
+                    <span class="spinner-border spinner-border-sm me-1" role="status"/>
+                    Aguardando o pagamento. Esta página se atualiza sozinha.
+                </p>
+            </div>
+        </div>
     </template>
 
 </odoo>

@@ -24,10 +24,13 @@ class TestPaymentAsaas(TransactionCase):
             "zip": "01310-100",
         })
 
-    def _transaction(self, partner=None, amount=38.0):
+    def _transaction(self, partner=None, amount=38.0, method=None):
+        payment_method = self.provider.payment_method_ids[:1]
+        if method:
+            payment_method = self.env.ref("payment.payment_method_%s" % method)
         return self.env["payment.transaction"].create({
             "provider_id": self.provider.id,
-            "payment_method_id": self.provider.payment_method_ids[:1].id,
+            "payment_method_id": payment_method.id,
             "partner_id": (partner or self.partner).id,
             "amount": amount,
             "currency_id": self.brl.id,
@@ -154,6 +157,128 @@ class TestPaymentAsaas(TransactionCase):
              patch.object(AsaasClient, "create_payment", return_value={"id": "pay_1"}):
             with self.assertRaises(ValidationError):
                 tx._get_specific_rendering_values({})
+
+    # ------------------------------------------------------------------ #
+    # Checkout transparente                                               #
+    # ------------------------------------------------------------------ #
+
+    CARD = {"number": "5162 3060 0482 9866", "holder": "COMPRADORA TESTE",
+            "expiry": "05/30", "cvv": "318", "holder_document": ""}
+
+    def test_provider_uses_the_inline_form(self):
+        self.assertEqual(self.provider.inline_form_view_id,
+                         self.env.ref("payment_asaas.inline_form"))
+
+    def test_setup_fixes_old_pending_text_and_card_label(self):
+        self.provider.pending_msg = "<p>Cobrança gerada no Asaas.</p>"
+        self.provider._asaas_setup_checkout()
+        self.assertNotIn("Asaas", self.provider.pending_msg)
+        self.assertIn("Pedido recebido", self.provider.pending_msg)
+
+    def test_processing_values_carry_an_access_token_for_this_transaction(self):
+        tx = self._transaction(method="pix")
+        token = tx._get_specific_processing_values({})["asaas_access_token"]
+        self.assertTrue(tx._asaas_check_access_token(token))
+        other = self._transaction(method="pix")
+        self.assertFalse(other._asaas_check_access_token(token))
+
+    def test_pix_charge_shows_the_qr_code_on_the_site(self):
+        tx = self._transaction(method="pix")
+        with patch.object(AsaasClient, "create_customer", return_value={"id": "cus_1"}), \
+             patch.object(AsaasClient, "create_payment", return_value={
+                 "id": "pay_pix", "status": "PENDING", "externalReference": tx.reference,
+             }) as create, \
+             patch.object(AsaasClient, "get_pix_qrcode", return_value={
+                 "encodedImage": "iVBORw0KGgo=", "payload": "00020126pix",
+                 "expirationDate": "2026-10-08 23:59:59",
+             }):
+            tx._asaas_create_direct_charge()
+
+        payload = create.call_args[0][0]
+        self.assertEqual(payload["billingType"], "PIX")
+        self.assertNotIn("callback", payload, "ninguém sai do site")
+        self.assertEqual(tx.provider_reference, "pay_pix")
+        self.assertEqual(tx.state, "pending")
+        self.assertEqual(tx.asaas_pix_payload, "00020126pix")
+        self.assertEqual(tx.asaas_pix_qr_code, "iVBORw0KGgo=")
+
+    def test_pending_pix_renders_qr_code_and_copy_code(self):
+        tx = self._transaction(method="pix")
+        tx.write({"asaas_pix_qr_code": "iVBORw0KGgo=", "asaas_pix_payload": "00020126pix",
+                  "provider_reference": "pay_pix"})
+        tx._set_pending()
+        html = str(self.env["ir.qweb"]._render("payment_asaas.transaction_instructions", {"tx": tx}))
+        self.assertIn("data:image/png;base64,iVBORw0KGgo=", html)
+        self.assertIn("00020126pix", html)
+        self.assertIn(tx._asaas_access_token(), html)
+        tx._set_done()
+        html = str(self.env["ir.qweb"]._render("payment_asaas.transaction_instructions", {"tx": tx}))
+        self.assertNotIn("00020126pix", html, "pago, não mostra mais como pagar")
+
+    def test_boleto_charge_keeps_pdf_and_digitable_line(self):
+        tx = self._transaction(method="boleto")
+        with patch.object(AsaasClient, "create_customer", return_value={"id": "cus_1"}), \
+             patch.object(AsaasClient, "create_payment", return_value={
+                 "id": "pay_bol", "status": "PENDING", "bankSlipUrl": "https://asaas/b.pdf",
+             }) as create, \
+             patch.object(AsaasClient, "get_identification_field", return_value={
+                 "identificationField": "00190000090281913600966281313335889830000038000",
+             }):
+            tx._asaas_create_direct_charge()
+        self.assertEqual(create.call_args[0][0]["billingType"], "BOLETO")
+        self.assertEqual(tx.state, "pending")
+        self.assertEqual(tx.asaas_boleto_url, "https://asaas/b.pdf")
+        self.assertTrue(tx.asaas_boleto_line.startswith("0019"))
+
+    def test_card_charge_is_paid_on_the_spot(self):
+        tx = self._transaction(method="card")
+        with patch.object(AsaasClient, "create_customer", return_value={"id": "cus_1"}), \
+             patch.object(AsaasClient, "create_payment", return_value={
+                 "id": "pay_card", "status": "CONFIRMED",
+             }) as create:
+            tx._asaas_create_direct_charge(card=dict(self.CARD), remote_ip="200.1.2.3")
+
+        payload = create.call_args[0][0]
+        self.assertEqual(payload["billingType"], "CREDIT_CARD")
+        self.assertEqual(payload["creditCard"]["number"], "5162306004829866")
+        self.assertEqual(payload["creditCard"]["expiryMonth"], "05")
+        self.assertEqual(payload["creditCard"]["expiryYear"], "2030")
+        self.assertEqual(payload["creditCardHolderInfo"]["cpfCnpj"], "52998224725",
+                         "sem CPF do titular, vale o do comprador")
+        self.assertEqual(payload["creditCardHolderInfo"]["postalCode"], "01310100")
+        self.assertEqual(payload["remoteIp"], "200.1.2.3")
+        self.assertEqual(tx.state, "done")
+
+    def test_refused_card_marks_the_transaction_as_error(self):
+        tx = self._transaction(method="card")
+        recusa = AsaasError("Transação não autorizada.", status_code=400, payload={})
+        with patch.object(AsaasClient, "create_customer", return_value={"id": "cus_1"}), \
+             patch.object(AsaasClient, "create_payment", side_effect=recusa):
+            # Sem assertRaises: ele desfaz o savepoint, e o erro gravado é o que se testa
+            # (a rota devolve a mensagem sem exceção, então o erro fica gravado).
+            try:
+                tx._asaas_create_direct_charge(card=dict(self.CARD))
+            except AsaasError:
+                pass
+            else:
+                self.fail("cartão recusado tem que levantar AsaasError")
+        self.assertEqual(tx.state, "error")
+        self.assertIn("não autorizada", tx.state_message)
+
+    def test_incomplete_card_is_refused_before_calling_asaas(self):
+        tx = self._transaction(method="card")
+        with patch.object(AsaasClient, "create_customer", return_value={"id": "cus_1"}), \
+             patch.object(AsaasClient, "create_payment") as create:
+            with self.assertRaises(ValidationError):
+                tx._asaas_create_direct_charge(card={"number": "4111", "holder": "X"})
+        create.assert_not_called()
+
+    def test_second_call_does_not_create_a_second_charge(self):
+        tx = self._transaction(method="pix")
+        tx.provider_reference = "pay_ja_existe"
+        with patch.object(AsaasClient, "create_payment") as create:
+            tx._asaas_create_direct_charge()
+        create.assert_not_called()
 
     # ------------------------------------------------------------------ #
     # Retorno de situação                                                 #

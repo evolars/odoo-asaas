@@ -1,4 +1,4 @@
-from odoo import _, fields, models
+from odoo import _, api, fields, models
 from odoo.exceptions import UserError
 
 from odoo.addons.asaas_base.models.asaas_client import AsaasClient
@@ -31,6 +31,28 @@ class PaymentProvider(models.Model):
         if self.code != "asaas":
             return default_codes
         return const.DEFAULT_PAYMENT_METHOD_CODES
+
+    @api.model
+    def _asaas_setup_checkout(self):
+        """Prepara o checkout transparente no provedor já instalado.
+
+        O registro do provedor é `noupdate`: sem isto, quem atualiza o módulo
+        continuaria mandando o comprador para a página do Asaas e mostrando o
+        texto antigo de "cobrança gerada no Asaas".
+        """
+        providers = self.sudo().search([("code", "=", "asaas")])
+        inline_form = self.env.ref("payment_asaas.inline_form", raise_if_not_found=False)
+        if inline_form:
+            providers.inline_form_view_id = inline_form
+        for provider in providers:
+            if "Cobrança gerada no Asaas" in (provider.pending_msg or ""):
+                provider.pending_msg = const.PENDING_MSG
+        # A tradução pt_BR do Odoo chama o método "Card" de "Quadro".
+        card = self.env.ref("payment.payment_method_card", raise_if_not_found=False)
+        if card and self.env["res.lang"]._lang_get("pt_BR"):
+            card_pt = card.sudo().with_context(lang="pt_BR")
+            if card_pt.name == "Quadro":
+                card_pt.name = "Cartão de crédito"
 
     def _asaas_get_client(self):
         """Cliente com a credencial deste provedor.
