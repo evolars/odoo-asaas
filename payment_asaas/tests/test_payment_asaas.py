@@ -211,6 +211,27 @@ class TestPaymentAsaas(TransactionCase):
         self.assertEqual(event.state, "done")
         self.assertEqual(tx.state, "done")
 
+    def test_shop_charge_is_not_mirrored_by_the_billing_module(self):
+        """Com o evolars_asaas junto, a cobrança da loja não vira cobrança do financeiro.
+
+        Viraria uma segunda notificação ao comprador e o recebimento lançado duas
+        vezes. Antes, ainda quebrava com billingType UNDEFINED.
+        """
+        if "evolars.asaas.payment" not in self.env:
+            self.skipTest("evolars_asaas não instalado")
+        tx = self._transaction()
+        for event_id, name, status in (("evt_1", "PAYMENT_CREATED", "PENDING"),
+                                       ("evt_2", "PAYMENT_RECEIVED", "RECEIVED")):
+            event = self.env["asaas.webhook.event"].ingest({
+                "id": event_id, "event": name,
+                "payment": {"id": "pay_loja", "status": status, "billingType": "UNDEFINED",
+                            "value": 38.0, "externalReference": tx.reference},
+            })
+            self.assertEqual(event.state, "done", event.error)
+        self.assertEqual(tx.state, "done")
+        self.assertFalse(self.env["evolars.asaas.payment"].search(
+            [("asaas_payment_id", "=", "pay_loja")]))
+
     def test_charge_created_outside_the_shop_is_ignored_not_an_error(self):
         """Cobrança de faturamento ou assinatura não tem transação — é normal."""
         event = self.env["asaas.webhook.event"].ingest({

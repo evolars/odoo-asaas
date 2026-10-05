@@ -114,7 +114,8 @@ class TestAsaas(TransactionCase):
         self.assertEqual(str(self.payment.received_date), "2026-08-26")
         self.assertTrue(self.payment.account_payment_id)
         self.assertEqual(self.payment.account_payment_id.amount, 500.0)
-        self.assertEqual(self.payment.account_payment_id.state, "posted")
+        # no Odoo 18 o pagamento conciliado com a fatura fica "paid"
+        self.assertIn(self.payment.account_payment_id.state, ("posted", "paid"))
         self.assertTrue(self.payment.receipt_sent)
         self.assertEqual(self.payment.resend_email_id, "resend_receipt_uuid_777")
         self.assertTrue(self.payment.receipt_sent_date)
