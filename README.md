@@ -104,6 +104,11 @@ O ambiente segue o **estado do provedor**, não as Configurações: provedor em 
 Sandbox, sempre. Não existe combinação de configuração que faça um provedor de teste emitir
 cobrança de verdade.
 
+A chave do provedor é opcional: vazia, vale a de Configurações → Asaas, **desde que seja do
+mesmo ambiente** (provedor *Ativado* com Configurações em Produção, *Teste* com Sandbox). Antes
+ela era obrigatória no provedor, e uma loja com a conta pronta em Configurações ficava sem
+pagamento no checkout.
+
 ### Requisitos
 
 * Moeda **BRL** — o Asaas não liquida em outra, e o provedor some do checkout fora dela

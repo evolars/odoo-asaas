@@ -1,4 +1,5 @@
 from odoo import _, fields, models
+from odoo.exceptions import UserError
 
 from odoo.addons.asaas_base.models.asaas_client import AsaasClient
 from odoo.addons.payment_asaas import const
@@ -12,10 +13,10 @@ class PaymentProvider(models.Model):
     )
     asaas_api_key = fields.Char(
         string="Chave de API do Asaas",
-        required_if_provider="asaas",
         groups="base.group_system",
         help="$aact_hmlg_... no Sandbox, $aact_prod_... em Produção. O ambiente "
-             "segue o estado do provedor: Teste usa o Sandbox.",
+             "segue o estado do provedor: Teste usa o Sandbox. Vazia, vale a chave "
+             "de Configurações → Asaas, se for do mesmo ambiente.",
     )
 
     def _get_supported_currencies(self):
@@ -39,7 +40,29 @@ class PaymentProvider(models.Model):
         provedor de teste emitir cobrança de verdade por engano de configuração.
         """
         self.ensure_one()
-        return AsaasClient(self.asaas_api_key, sandbox=self.state != "enabled")
+        sandbox = self.state != "enabled"
+        return AsaasClient(self._asaas_get_api_key(sandbox), sandbox=sandbox)
+
+    def _asaas_get_api_key(self, sandbox):
+        """Chave própria do provedor; sem ela, a de Configurações → Asaas.
+
+        A chave costuma ser colada uma vez só, em Configurações → Asaas (é lá que
+        se registra o webhook). Exigir de novo no provedor deixava o checkout sem
+        pagamento com a conta pronta. A global só vale se for do mesmo ambiente:
+        provedor em Teste nunca usa chave de produção, e vice-versa.
+        """
+        self.ensure_one()
+        if self.asaas_api_key:
+            return self.asaas_api_key
+        config = self.env["asaas.config"]
+        api_key = config.get_param("asaas.api_key")
+        if api_key and config.is_sandbox() == sandbox:
+            return api_key
+        raise UserError(_(
+            "Sem chave de API do Asaas para o ambiente %(ambiente)s: preencha a chave "
+            "no provedor ou em Configurações → Asaas (com o mesmo ambiente).",
+            ambiente="Sandbox" if sandbox else "Produção",
+        ))
 
     def action_asaas_test_connection(self):
         self.ensure_one()

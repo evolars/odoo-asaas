@@ -9,7 +9,7 @@
             <group name="provider_credentials" position="inside">
                 <group invisible="code != 'asaas'">
                     <field name="asaas_api_key" password="True"
-                           required="code == 'asaas' and state != 'disabled'"/>
+                           placeholder="Vazia: usa a de Configurações → Asaas"/>
                     <div colspan="2" class="text-muted">
                         O ambiente acompanha o estado acima: <b>Teste</b> fala com o Sandbox
                         (<code>$aact_hmlg_…</code>) e <b>Ativado</b> com a produção

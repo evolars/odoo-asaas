@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from odoo.exceptions import ValidationError
+from odoo.exceptions import UserError, ValidationError
 from odoo.tests import TransactionCase, tagged
 
 from odoo.addons.asaas_base.models.asaas_client import AsaasClient
@@ -44,6 +44,34 @@ class TestPaymentAsaas(TransactionCase):
         self.assertTrue(self.provider._asaas_get_client().sandbox)
         self.provider.state = "enabled"
         self.assertFalse(self.provider._asaas_get_client().sandbox)
+
+    def _global_key(self, api_key, environment):
+        params = self.env["ir.config_parameter"].sudo()
+        params.set_param("asaas.api_key", api_key)
+        params.set_param("asaas.environment", environment)
+
+    def test_empty_provider_key_uses_the_settings_key(self):
+        """A chave colada só em Configurações → Asaas basta para o checkout."""
+        self.provider.write({"asaas_api_key": False, "state": "enabled"})
+        self._global_key("$aact_prod_global", "production")
+        client = self.provider._asaas_get_client()
+        self.assertEqual(client.api_key, "$aact_prod_global")
+        self.assertFalse(client.sandbox)
+
+    def test_provider_key_wins_over_the_settings_key(self):
+        self._global_key("$aact_hmlg_global", "sandbox")
+        self.assertEqual(self.provider._asaas_get_client().api_key, "$aact_hmlg_test")
+
+    def test_settings_key_from_another_environment_is_never_used(self):
+        """Provedor em teste com chave de produção nas Configurações: nada de cobrança real."""
+        self.provider.asaas_api_key = False
+        self._global_key("$aact_prod_global", "production")
+        with self.assertRaises(UserError):
+            self.provider._asaas_get_client()
+
+    def test_provider_can_be_enabled_without_its_own_key(self):
+        self.provider.write({"asaas_api_key": False, "state": "enabled", "is_published": True})
+        self.assertEqual(self.provider.state, "enabled")
 
     def test_only_brl_is_supported(self):
         names = self.provider._get_supported_currencies().mapped("name")
