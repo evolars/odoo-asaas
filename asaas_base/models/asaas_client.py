@@ -246,6 +246,14 @@ class AsaasClient:
         return self.create_webhook(payload)
 
 
+def is_foreign_payer(partner):
+    """Pagador de fora do Brasil, que não tem CPF nem CNPJ.
+
+    Sem país, conta como brasileiro: é o caso da maioria dos cadastros antigos.
+    """
+    return bool(partner.country_id) and partner.country_id.code != "BR"
+
+
 def customer_payload(partner, notification_disabled=True):
     """Traduz um `res.partner` para o corpo de /customers.
 
@@ -266,6 +274,12 @@ def customer_payload(partner, notification_disabled=True):
         "city": partner.city,
     }
     payload.update({key: value for key, value in optional.items() if value})
+    if is_foreign_payer(partner):
+        # Estrangeiro entra como `foreignCustomer`, sem CPF/CNPJ. O documento de lá
+        # (passaporte, NIF...), o CEP e o estado não são o que o Asaas valida como
+        # CPF, CEP e UF; mandar faria a API recusar o cliente.
+        payload["foreignCustomer"] = True
+        return payload
     if partner.zip:
         payload["postalCode"] = partner.zip.replace("-", "").replace(".", "")
     if partner.state_id:

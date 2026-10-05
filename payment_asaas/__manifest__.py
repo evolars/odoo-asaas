@@ -1,6 +1,6 @@
 {
     "name": "Asaas - Provedor de Pagamento",
-    "version": "18.0.1.5.0",
+    "version": "18.0.1.5.1",
     "category": "Accounting/Payment Providers",
     "summary": "Receber Pix, boleto e cartão pelo Asaas no checkout do site",
     "description": """

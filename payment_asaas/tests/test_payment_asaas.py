@@ -324,6 +324,37 @@ class TestPaymentAsaas(TransactionCase):
         self.assertEqual(payload["value"], 9800.0)
         self.assertNotIn("installmentCount", payload)
 
+    def test_card_charge_for_a_reader_abroad(self):
+        """Leitora em Portugal: sem CPF, entra no Asaas como pagadora estrangeira."""
+        reader = self.env["res.partner"].create({
+            "name": "Leitora Portuguesa", "email": "leitora@example.pt",
+            "country_id": self.env.ref("base.pt").id, "city": "Lisboa", "zip": "1100-148",
+            "street": "Rua Augusta, 27", "vat": "CC 12345678 9 ZZ1",
+        })
+        tx = self._transaction(partner=reader, method="card")
+        with patch.object(AsaasClient, "create_customer", return_value={"id": "cus_pt"}) as customer, \
+             patch.object(AsaasClient, "create_payment", return_value={
+                 "id": "pay_pt", "status": "CONFIRMED",
+             }) as create:
+            tx._asaas_create_direct_charge(card=dict(self.CARD))
+
+        customer_payload = customer.call_args[0][0]
+        self.assertTrue(customer_payload["foreignCustomer"])
+        self.assertNotIn("cpfCnpj", customer_payload, "documento de fora não é CPF")
+        self.assertNotIn("cpfCnpj", create.call_args[0][0]["creditCardHolderInfo"])
+        self.assertEqual(tx.state, "done")
+
+    def test_reader_abroad_pays_without_any_document(self):
+        reader = self.env["res.partner"].create({
+            "name": "Reader Abroad", "country_id": self.env.ref("base.pt").id})
+        tx = self._transaction(partner=reader, method="card")
+        with patch.object(AsaasClient, "create_customer", return_value={"id": "cus_x"}), \
+             patch.object(AsaasClient, "create_payment", return_value={
+                 "id": "pay_x", "status": "CONFIRMED",
+             }):
+            tx._asaas_create_direct_charge(card=dict(self.CARD))
+        self.assertEqual(tx.state, "done")
+
     def test_refused_card_marks_the_transaction_as_error(self):
         tx = self._transaction(method="card")
         recusa = AsaasError("Transação não autorizada.", status_code=400, payload={})

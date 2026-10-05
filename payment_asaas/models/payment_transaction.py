@@ -6,7 +6,7 @@ from odoo import _, fields, models
 from odoo.exceptions import ValidationError
 from odoo.tools import consteq, hmac as hmac_tool
 
-from odoo.addons.asaas_base.models.asaas_client import AsaasError
+from odoo.addons.asaas_base.models.asaas_client import AsaasError, is_foreign_payer
 from odoo.addons.payment_asaas import const
 
 _logger = logging.getLogger(__name__)
@@ -78,7 +78,8 @@ class PaymentTransaction(models.Model):
 
         client = self.provider_id._asaas_get_client()
         partner = self.partner_id
-        if not partner.vat and not self.env.context.get("asaas_payer_document"):
+        if (not partner.vat and not self.env.context.get("asaas_payer_document")
+                and not is_foreign_payer(partner)):
             raise ValidationError(_(
                 "Informe o CPF ou CNPJ de %s para pagar pelo Asaas.", partner.display_name
             ))
@@ -207,9 +208,23 @@ class PaymentTransaction(models.Model):
             raise ValidationError(_("Confira os dados do cartão: número, nome, validade e CVV."))
 
         partner = self.partner_id
-        document = digits(card.get("holder_document")) or digits(
-            partner.cnpj_cpf_stripped if "cnpj_cpf_stripped" in partner._fields else partner.vat
-        ) or digits(partner.vat)
+        holder_info = {
+            "name": holder_name,
+            "email": partner.email or "",
+            "postalCode": digits(partner.zip),
+            "addressNumber": self._asaas_address_number(partner),
+            "addressComplement": partner.street2 or None,
+            "phone": digits(partner.phone or partner.mobile),
+        }
+        if is_foreign_payer(partner):
+            # O documento de quem mora fora não é CPF: o Asaas recusaria o titular.
+            document = digits(card.get("holder_document"))
+        else:
+            document = digits(card.get("holder_document")) or digits(
+                partner.cnpj_cpf_stripped if "cnpj_cpf_stripped" in partner._fields else partner.vat
+            ) or digits(partner.vat)
+        if document:
+            holder_info["cpfCnpj"] = document
         return {
             "creditCard": {
                 "holderName": holder_name,
@@ -218,15 +233,7 @@ class PaymentTransaction(models.Model):
                 "expiryYear": year,
                 "ccv": cvv,
             },
-            "creditCardHolderInfo": {
-                "name": holder_name,
-                "email": partner.email or "",
-                "cpfCnpj": document,
-                "postalCode": digits(partner.zip),
-                "addressNumber": self._asaas_address_number(partner),
-                "addressComplement": partner.street2 or None,
-                "phone": digits(partner.phone or partner.mobile),
-            },
+            "creditCardHolderInfo": holder_info,
             "remoteIp": remote_ip or None,
         }
 
@@ -296,7 +303,7 @@ class PaymentTransaction(models.Model):
 
         client = self.provider_id._asaas_get_client()
         partner = self.partner_id
-        if not partner.vat:
+        if not partner.vat and not is_foreign_payer(partner):
             # O Asaas recusa a cobrança sem CPF/CNPJ. Melhor dizer isso aqui, com
             # o nome do campo, do que deixar a API responder um erro genérico.
             raise ValidationError(_(
