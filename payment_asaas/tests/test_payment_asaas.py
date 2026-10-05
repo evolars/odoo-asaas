@@ -3,7 +3,7 @@ from unittest.mock import patch
 from odoo.exceptions import UserError, ValidationError
 from odoo.tests import TransactionCase, tagged
 
-from odoo.addons.asaas_base.models.asaas_client import AsaasClient
+from odoo.addons.asaas_base.models.asaas_client import AsaasClient, AsaasError
 
 
 @tagged("post_install", "-at_install", "payment_asaas")
@@ -104,6 +104,42 @@ class TestPaymentAsaas(TransactionCase):
         self.assertEqual(payload["value"], 38.0)
         self.assertEqual(payload["externalReference"], tx.reference)
         self.assertTrue(payload["callback"]["successUrl"].endswith("/payment/status"))
+
+    def test_account_without_domain_still_gets_the_charge(self):
+        """Conta sem site cadastrado recusa o `callback`: a venda não pode morrer por isso."""
+        tx = self._transaction()
+        recusa = AsaasError("recusado", status_code=400, payload={"errors": [{
+            "code": "invalid_object",
+            "description": "Não há nenhum domínio configurado em sua conta. Cadastre um "
+                           "site em Minha Conta na aba Informações.",
+        }]})
+        enviados = []
+
+        def create_payment(client, payload):
+            enviados.append(dict(payload))
+            if "callback" in payload:
+                raise recusa
+            return {"id": "pay_9", "invoiceUrl": "https://www.asaas.com/i/pay_9"}
+
+        with patch.object(AsaasClient, "create_customer", return_value={"id": "cus_1"}), \
+             patch.object(AsaasClient, "create_payment", autospec=True, side_effect=create_payment):
+            values = tx._get_specific_rendering_values({})
+
+        self.assertEqual(values["api_url"], "https://www.asaas.com/i/pay_9")
+        self.assertEqual(len(enviados), 2)
+        self.assertNotIn("callback", enviados[1])
+        self.assertEqual(enviados[1]["externalReference"], tx.reference,
+                         "o webhook acha a transação pela referência")
+
+    def test_other_refusals_still_raise(self):
+        tx = self._transaction()
+        recusa = AsaasError("recusado", status_code=400, payload={"errors": [{
+            "code": "invalid_value", "description": "Valor inválido."}]})
+        with patch.object(AsaasClient, "create_customer", return_value={"id": "cus_1"}), \
+             patch.object(AsaasClient, "create_payment", side_effect=recusa) as create:
+            with self.assertRaises(AsaasError):
+                tx._get_specific_rendering_values({})
+        self.assertEqual(create.call_count, 1)
 
     def test_customer_without_document_fails_with_a_useful_message(self):
         sem_documento = self.env["res.partner"].create({"name": "Sem CPF"})

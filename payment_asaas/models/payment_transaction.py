@@ -4,6 +4,7 @@ from datetime import timedelta
 from odoo import _, fields, models
 from odoo.exceptions import ValidationError
 
+from odoo.addons.asaas_base.models.asaas_client import AsaasError
 from odoo.addons.payment_asaas import const
 
 _logger = logging.getLogger(__name__)
@@ -28,13 +29,37 @@ class PaymentTransaction(models.Model):
             ))
 
         customer_id = partner._asaas_ensure_customer(client)
-        payment = client.create_payment(self._asaas_prepare_payment_payload(customer_id))
+        payload = self._asaas_prepare_payment_payload(customer_id)
+        try:
+            payment = client.create_payment(payload)
+        except AsaasError as error:
+            if not self._asaas_is_callback_domain_error(error):
+                raise
+            # A volta automática para a loja exige o site cadastrado na conta do
+            # Asaas (Minha Conta → Informações). Sem ele, a cobrança inteira era
+            # recusada e ninguém pagava. A confirmação vem pelo webhook; perder a
+            # volta automática é bem menos grave que perder a venda.
+            _logger.warning(
+                "Asaas: conta sem domínio cadastrado; cobrança %s criada sem volta "
+                "automática para a loja.", self.reference,
+            )
+            payload.pop("callback", None)
+            payment = client.create_payment(payload)
 
         self.provider_reference = payment["id"]
         invoice_url = payment.get("invoiceUrl")
         if not invoice_url:
             raise ValidationError(_("O Asaas não devolveu a página de pagamento da cobrança."))
         return {"api_url": invoice_url, "url_params": {}}
+
+    @staticmethod
+    def _asaas_is_callback_domain_error(error):
+        """Recusa por falta de site cadastrado, que vale só para o `callback`."""
+        errors = (getattr(error, "payload", None) or {}).get("errors") or []
+        text = " ".join(
+            "%s %s" % (item.get("code", ""), item.get("description", "")) for item in errors
+        ).lower()
+        return "domínio" in text or "dominio" in text or "domain" in text
 
     def _asaas_prepare_payment_payload(self, customer_id):
         self.ensure_one()
