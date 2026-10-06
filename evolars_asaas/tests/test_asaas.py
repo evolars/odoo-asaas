@@ -304,30 +304,30 @@ class TestAsaas(TransactionCase):
         # Recibo não foi marcado como enviado com sucesso
         self.assertFalse(self.payment.receipt_sent)
 
-    def test_adr019_universal_visibility_and_access_for_base_group_user(self):
-        """Assegura conformidade com ADR-019: usuário interno comum (base.group_user) possui acesso total ao módulo."""
+    def test_access_only_with_asaas_group(self):
+        """Usuário interno comum não vê o Asaas; quem tem Asaas Usuário vê e cobra."""
         internal_user = self.env["res.users"].create({
             "name": "Operador Interno Evolars",
             "login": "operador.teste@evolars.com.br",
             "email": "operador.teste@evolars.com.br",
             "groups_id": [(6, 0, [self.env.ref("base.group_user").id])],
         })
+        asaas_user = self.env.ref("evolars_asaas.group_asaas_user")
+        self.assertNotIn(asaas_user, internal_user.groups_id)
+        with self.assertRaises(AccessError):
+            self.env["evolars.asaas.payment"].with_user(internal_user).search([], limit=1)
+        with self.assertRaises(AccessError):
+            self.env["evolars.asaas.webhook.event"].with_user(internal_user).search([], limit=1)
 
-        # Criação e leitura de cobrança como usuário interno
+        internal_user.groups_id = [(4, asaas_user.id)]
         payment_as_user = self.env["evolars.asaas.payment"].with_user(internal_user).create({
-            "name": "Cobrança Criada por Usuário Interno",
+            "name": "Cobrança Criada por Usuário do Asaas",
             "partner_id": self.partner.id,
             "amount": 250.0,
             "billing_type": "PIX",
             "company_id": self.company.id,
         })
-        self.assertTrue(payment_as_user)
         self.assertEqual(payment_as_user.amount, 250.0)
-
-        # Leitura de eventos de webhook como usuário interno
-        event_read = self.env["evolars.asaas.webhook.event"].with_user(internal_user).search([], limit=1)
-        # Não deve levantar AccessError
-        self.assertIsNotNone(event_read)
 
     def test_split_constraints_fixed_and_percentage(self):
         """Assegura validação defensiva contra splits inválidos."""
