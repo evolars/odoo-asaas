@@ -22,6 +22,9 @@ class PaymentTransaction(models.Model):
     asaas_pix_expiration = fields.Char(string="Pix válido até", copy=False, readonly=True)
     asaas_boleto_url = fields.Char(string="Boleto (PDF)", copy=False, readonly=True)
     asaas_boleto_line = fields.Char(string="Linha digitável", copy=False, readonly=True)
+    # Cartão parcelado: o Asaas cria uma cobrança por parcela, todas do mesmo parcelamento.
+    asaas_installment_id = fields.Char(string="Parcelamento no Asaas", copy=False, readonly=True, index="btree_not_null")
+    asaas_installment_count = fields.Integer(string="Parcelas", copy=False, readonly=True)
 
     def _get_specific_processing_values(self, processing_values):
         """Token que autoriza o navegador a criar a cobrança desta transação.
@@ -66,7 +69,7 @@ class PaymentTransaction(models.Model):
 
         client = self.provider_id._asaas_get_client()
         partner = self.partner_id
-        if not partner.vat:
+        if not partner.vat and not self.env.context.get("asaas_payer_document"):
             raise ValidationError(_(
                 "Informe o CPF ou CNPJ de %s para pagar pelo Asaas.", partner.display_name
             ))
@@ -74,8 +77,15 @@ class PaymentTransaction(models.Model):
         payload = self._asaas_prepare_payment_payload(customer_id)
         payload.pop("callback", None)  # ninguém sai do site, não há para onde voltar
         payload["billingType"] = billing_type
+        installments = 1
         if billing_type == "CREDIT_CARD":
             payload.update(self._asaas_prepare_card_payload(card or {}, remote_ip))
+            installments = self._asaas_card_installments(card or {})
+            if installments > 1:
+                # Parcelado: o Asaas divide o total (a primeira parcela pode levar os centavos).
+                payload.pop("value", None)
+                payload["installmentCount"] = installments
+                payload["totalValue"] = float(self.amount)
 
         try:
             payment = client.create_payment(payload)
@@ -87,6 +97,11 @@ class PaymentTransaction(models.Model):
             raise
 
         self.provider_reference = payment["id"]
+        if installments > 1:
+            self.write({
+                "asaas_installment_id": payment.get("installment") or False,
+                "asaas_installment_count": installments,
+            })
         if billing_type == "PIX":
             qr_code = client.get_pix_qrcode(payment["id"])
             self.write({
@@ -105,6 +120,68 @@ class PaymentTransaction(models.Model):
                 _logger.info("Asaas: linha digitável ainda indisponível em %s.", self.reference)
             self.write(values)
         self._handle_notification_data("asaas", payment)
+
+    def _asaas_set_payer_document(self, document):
+        """CPF/CNPJ informado no pagamento por quem ainda não tinha documento.
+
+        A proposta paga pelo portal não passa pelo checkout da loja, onde o CPF é
+        pedido: sem isto o Asaas recusaria a cobrança e o cliente não teria onde
+        corrigir. O documento fica no contato (a localização valida o número).
+        """
+        self.ensure_one()
+        partner = self.partner_id.sudo()
+        if partner.vat or not document:
+            return self
+        digits = re.sub(r"\D", "", document)
+        if len(digits) == 11:
+            vat = "%s.%s.%s-%s" % (digits[:3], digits[3:6], digits[6:9], digits[9:])
+        elif len(digits) == 14:
+            vat = "%s.%s.%s/%s-%s" % (digits[:2], digits[2:5], digits[5:8], digits[8:12], digits[12:])
+        else:
+            raise ValidationError(_("Informe um CPF (11 dígitos) ou um CNPJ (14 dígitos)."))
+        try:
+            with self.env.cr.savepoint():
+                partner.vat = vat
+        except ValidationError:
+            # Documento inválido ou já usado por outro contato (a localização não deixa
+            # repetir CPF): número inválido volta para o comprador; repetido segue só na
+            # cobrança, sem mexer nos cadastros.
+            if not self._asaas_document_is_valid(digits):
+                raise ValidationError(_("CPF ou CNPJ inválido. Confira os números."))
+            return self.with_context(asaas_payer_document=digits)
+        return self
+
+    @staticmethod
+    def _asaas_document_is_valid(digits):
+        """Dígitos verificadores de CPF (11) ou CNPJ (14)."""
+        if len(set(digits)) == 1:
+            return False
+        if len(digits) == 11:
+            for size in (9, 10):
+                total = sum(int(digits[i]) * (size + 1 - i) for i in range(size))
+                if int(digits[size]) != (total * 10 % 11) % 10:
+                    return False
+            return True
+        if len(digits) == 14:
+            for size in (12, 13):
+                weights = ([5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2] if size == 12
+                           else [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2])
+                rest = sum(int(digits[i]) * weights[i] for i in range(size)) % 11
+                if int(digits[size]) != (0 if rest < 2 else 11 - rest):
+                    return False
+            return True
+        return False
+
+    def _asaas_card_installments(self, card):
+        """Parcelas pedidas pelo comprador, conferidas com o que o provedor permite."""
+        self.ensure_one()
+        try:
+            count = int(card.get("installments") or 1)
+        except (TypeError, ValueError):
+            count = 0
+        if count not in self.provider_id._asaas_installment_counts(self.amount):
+            raise ValidationError(_("Número de parcelas não disponível para este valor."))
+        return count
 
     def _asaas_prepare_card_payload(self, card, remote_ip):
         """Corpo do cartão e do titular para a cobrança `CREDIT_CARD`."""
@@ -240,6 +317,12 @@ class PaymentTransaction(models.Model):
                 ("provider_reference", "=", notification_data["id"]),
                 ("provider_code", "=", "asaas"),
             ])
+        if not tx and notification_data.get("installment"):
+            # Outra parcela do mesmo cartão: a transação é a do parcelamento.
+            tx = self.search([
+                ("asaas_installment_id", "=", notification_data["installment"]),
+                ("provider_code", "=", "asaas"),
+            ], limit=1)
         if not tx:
             raise ValidationError(_(
                 "Asaas: nenhuma transação encontrada para a cobrança %s.",

@@ -19,6 +19,32 @@ class PaymentProvider(models.Model):
              "de Configurações → Asaas, se for do mesmo ambiente.",
     )
 
+    asaas_max_installments = fields.Integer(
+        string="Parcelas no cartão (máximo)", default=1,
+        help="Até quantas vezes o comprador pode parcelar no cartão, sem juros para ele "
+             "(a taxa do parcelamento é descontada pelo Asaas). 1 = só à vista.",
+    )
+    asaas_min_installment_amount = fields.Float(
+        string="Parcela mínima", default=100.0,
+        help="Valor mínimo de cada parcela. Uma compra de R$ 300 com parcela mínima de "
+             "R$ 100 vai até 3x. O Asaas não aceita parcela abaixo de R$ 5.",
+    )
+
+    _sql_constraints = [
+        ("asaas_installments_range", "CHECK(asaas_max_installments BETWEEN 1 AND 21)",
+         "O Asaas parcela no cartão em até 21 vezes."),
+    ]
+
+    def _asaas_installment_counts(self, amount):
+        """Números de parcelas que valem para este valor (sempre inclui o 1, à vista)."""
+        self.ensure_one()
+        minimum = max(self.asaas_min_installment_amount or 0.0, const.MIN_INSTALLMENT_VALUE)
+        counts = [1]
+        for count in range(2, max(self.asaas_max_installments or 1, 1) + 1):
+            if amount / count >= minimum:
+                counts.append(count)
+        return counts
+
     def _get_supported_currencies(self):
         """O Asaas só liquida em BRL."""
         supported = super()._get_supported_currencies()

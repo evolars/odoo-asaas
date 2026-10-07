@@ -16,8 +16,20 @@
          cartão) com `pm_sudo` do método; só o cartão pede dados. -->
     <template id="inline_form">
         <t t-set="asaas_pm_code" t-value="pm_sudo and pm_sudo.code"/>
+        <!-- Quem paga sem CPF/CNPJ no cadastro (proposta pelo portal): pede aqui.
+             Os campos novos são lidos com guarda: no deploy, o container antigo serve este
+             template já atualizado com o código anterior. -->
+        <t t-set="asaas_payer" t-value="request.env['res.partner'].sudo().browse(partner_id) if partner_id else None"/>
+        <div t-if="asaas_payer and not asaas_payer.vat" class="o_asaas_payer_document mt-2">
+            <label class="form-label small mb-1" t-attf-for="o_asaas_payer_document_{{provider_id}}_{{asaas_pm_code}}">CPF ou CNPJ de quem paga</label>
+            <input type="text" name="asaas_payer_document" class="form-control"
+                   t-attf-id="o_asaas_payer_document_{{provider_id}}_{{asaas_pm_code}}"
+                   inputmode="numeric" maxlength="18" autocomplete="off"/>
+        </div>
         <div t-if="asaas_pm_code == 'card'" class="o_asaas_card_form mt-2"
-             t-att-data-provider-id="provider_id">
+             t-att-data-provider-id="provider_id"
+             t-att-data-max-installments="provider_sudo.asaas_max_installments if provider_sudo and 'asaas_max_installments' in provider_sudo._fields else 1"
+             t-att-data-min-installment="max(provider_sudo.asaas_min_installment_amount, 5.0) if provider_sudo and 'asaas_min_installment_amount' in provider_sudo._fields else 5.0">
             <div class="row g-2">
                 <div class="col-12">
                     <label class="form-label small mb-1" t-attf-for="o_asaas_card_number_{{provider_id}}">Número do cartão</label>
@@ -45,6 +57,13 @@
                            t-attf-id="o_asaas_card_cvv_{{provider_id}}"
                            inputmode="numeric" autocomplete="cc-csc" maxlength="4"
                            placeholder="123"/>
+                </div>
+                <div class="col-12 o_asaas_installments d-none">
+                    <label class="form-label small mb-1" t-attf-for="o_asaas_card_installments_{{provider_id}}">Parcelas</label>
+                    <select name="asaas_card_installments" class="form-select"
+                            t-attf-id="o_asaas_card_installments_{{provider_id}}">
+                        <option value="1">À vista</option>
+                    </select>
                 </div>
                 <div class="col-12">
                     <label class="form-label small mb-1" t-attf-for="o_asaas_card_document_{{provider_id}}">CPF/CNPJ do titular <span class="text-muted">(se não for o seu)</span></label>

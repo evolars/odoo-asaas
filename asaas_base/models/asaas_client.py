@@ -275,6 +275,8 @@ def customer_payload(partner, notification_disabled=True):
     documento = partner.vat
     if "cnpj_cpf_stripped" in partner._fields:
         documento = partner.cnpj_cpf_stripped or partner.vat
+    # Documento informado no pagamento e que não coube no cadastro (repetido em outro contato).
+    documento = documento or partner.env.context.get("asaas_payer_document")
     if documento:
         payload["cpfCnpj"] = "".join(char for char in documento if char.isalnum())
     return payload

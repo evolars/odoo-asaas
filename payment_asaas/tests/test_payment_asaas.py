@@ -249,6 +249,79 @@ class TestPaymentAsaas(TransactionCase):
         self.assertEqual(payload["remoteIp"], "200.1.2.3")
         self.assertEqual(tx.state, "done")
 
+    def test_installment_counts_follow_max_and_minimum(self):
+        self.provider.write({"asaas_max_installments": 12, "asaas_min_installment_amount": 100.0})
+        self.assertEqual(self.provider._asaas_installment_counts(90.0), [1])
+        self.assertEqual(self.provider._asaas_installment_counts(350.0), [1, 2, 3])
+        self.assertEqual(self.provider._asaas_installment_counts(9800.0), list(range(1, 13)))
+        self.provider.asaas_max_installments = 1
+        self.assertEqual(self.provider._asaas_installment_counts(9800.0), [1])
+
+    def test_card_in_installments_sends_count_and_total(self):
+        self.provider.write({"asaas_max_installments": 12, "asaas_min_installment_amount": 100.0})
+        tx = self._transaction(method="card", amount=9800.0)
+        with patch.object(AsaasClient, "create_customer", return_value={"id": "cus_1"}), \
+             patch.object(AsaasClient, "create_payment", return_value={
+                 "id": "pay_parc_1", "status": "CONFIRMED", "installment": "ins_1",
+             }) as create:
+            tx._asaas_create_direct_charge(card=dict(self.CARD, installments="10"))
+        payload = create.call_args[0][0]
+        self.assertEqual(payload["installmentCount"], 10)
+        self.assertEqual(payload["totalValue"], 9800.0)
+        self.assertNotIn("value", payload)
+        self.assertEqual(tx.asaas_installment_id, "ins_1")
+        self.assertEqual(tx.asaas_installment_count, 10)
+        self.assertEqual(tx.state, "done")
+        # O webhook de outra parcela (outro id, sem a referência) cai na mesma transação.
+        found = self.env["payment.transaction"]._get_tx_from_notification_data(
+            "asaas", {"id": "pay_parc_2", "installment": "ins_1", "status": "CONFIRMED"})
+        self.assertEqual(found, tx)
+
+    def test_installments_above_the_limit_are_refused(self):
+        self.provider.write({"asaas_max_installments": 3, "asaas_min_installment_amount": 100.0})
+        tx = self._transaction(method="card", amount=250.0)
+        with patch.object(AsaasClient, "create_customer", return_value={"id": "cus_1"}), \
+             patch.object(AsaasClient, "create_payment") as create:
+            with self.assertRaises(ValidationError):
+                tx._asaas_create_direct_charge(card=dict(self.CARD, installments="3"))
+        create.assert_not_called()
+
+    def test_payer_without_document_informs_it_at_payment(self):
+        partner = self.env["res.partner"].create({"name": "Autora Sem CPF", "email": "autora@example.com"})
+        tx = self._transaction(partner=partner, method="pix")
+        with self.assertRaises(ValidationError):
+            tx._asaas_set_payer_document("123")
+        with self.assertRaises(ValidationError):
+            tx._asaas_set_payer_document("111.444.777-00")  # dígito verificador errado
+        digits = lambda value: "".join(c for c in value or "" if c.isdigit())
+        tx._asaas_set_payer_document("111.444.777-35")
+        self.assertEqual(digits(partner.vat), "11144477735")
+        # Quem já tem documento não é alterado pelo campo.
+        tx._asaas_set_payer_document("11.222.333/0001-81")
+        self.assertEqual(digits(partner.vat), "11144477735")
+
+    def test_payer_document_already_used_goes_only_to_the_charge(self):
+        partner = self.env["res.partner"].create({"name": "Autora Repetida", "email": "rep@example.com"})
+        tx = self._transaction(partner=partner, method="pix")
+        # O CPF já é da compradora do setUpClass: não cabe no cadastro, vai só na cobrança.
+        charged = tx._asaas_set_payer_document("529.982.247-25")
+        self.assertFalse(partner.vat)
+        with patch.object(AsaasClient, "create_customer", return_value={"id": "cus_rep"}) as customer, \
+             patch.object(AsaasClient, "create_payment", return_value={"id": "pay_rep", "status": "PENDING"}), \
+             patch.object(AsaasClient, "get_pix_qrcode", return_value={"encodedImage": "x", "payload": "y"}):
+            charged._asaas_create_direct_charge()
+        self.assertEqual(customer.call_args[0][0]["cpfCnpj"], "52998224725")
+
+    def test_card_without_installments_is_a_single_charge(self):
+        tx = self._transaction(method="card", amount=9800.0)
+        with patch.object(AsaasClient, "create_customer", return_value={"id": "cus_1"}), \
+             patch.object(AsaasClient, "create_payment", return_value={
+                 "id": "pay_card", "status": "CONFIRMED"}) as create:
+            tx._asaas_create_direct_charge(card=dict(self.CARD))
+        payload = create.call_args[0][0]
+        self.assertEqual(payload["value"], 9800.0)
+        self.assertNotIn("installmentCount", payload)
+
     def test_refused_card_marks_the_transaction_as_error(self):
         tx = self._transaction(method="card")
         recusa = AsaasError("Transação não autorizada.", status_code=400, payload={})

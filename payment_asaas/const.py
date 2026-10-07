@@ -31,3 +31,6 @@ PENDING_MSG = (
     "<p>Pedido recebido. Assim que o pagamento for confirmado, o pedido segue para "
     "separação e você recebe um e-mail.</p>"
 )
+
+# O Asaas recusa parcela de cartão abaixo de R$ 5.
+MIN_INSTALLMENT_VALUE = 5.0

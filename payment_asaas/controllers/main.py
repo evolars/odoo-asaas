@@ -43,7 +43,7 @@ class AsaasController(http.Controller):
         return tx
 
     @http.route("/payment/asaas/charge", type="json", auth="public")
-    def asaas_charge(self, reference, access_token, card=None):
+    def asaas_charge(self, reference, access_token, card=None, document=None):
         """Cria a cobrança do checkout transparente (Pix, boleto ou cartão).
 
         Erros voltam como `{"error": ...}` em vez de exceção: a exceção desfaria a
@@ -54,6 +54,7 @@ class AsaasController(http.Controller):
         remote_ip = (headers.get("X-Forwarded-For") or "").split(",")[0].strip() \
             or request.httprequest.remote_addr
         try:
+            tx = tx._asaas_set_payer_document(document)
             tx._asaas_create_direct_charge(card=card, remote_ip=remote_ip)
         except (UserError, ValidationError) as error:
             # AsaasError é UserError: a mensagem já vem traduzida para o comprador.

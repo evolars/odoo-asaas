@@ -109,6 +109,21 @@ mesmo ambiente** (provedor *Ativado* com Configurações em Produção, *Teste* 
 ela era obrigatória no provedor, e uma loja com a conta pronta em Configurações ficava sem
 pagamento no checkout.
 
+### Cartão parcelado
+
+No provedor, *Parcelas no cartão (máximo)* e *Parcela mínima*. O formulário do cartão mostra
+"3x de R$ 100,00 sem juros" até o máximo, enquanto a parcela não ficar abaixo da mínima (e nunca
+abaixo de R$ 5, limite do Asaas). A cobrança vai com `installmentCount` e `totalValue`; o Asaas
+cria uma cobrança por parcela, todas do mesmo parcelamento (`installment`), e o webhook de
+qualquer parcela encontra a transação por ele. Padrão: 1, só à vista. A taxa do parcelamento é
+descontada pelo Asaas de quem vende: "sem juros" é para o comprador.
+
+### CPF/CNPJ no pagamento
+
+Quem paga sem documento no cadastro (proposta paga pelo portal, que não passa pelo checkout)
+vê o campo "CPF ou CNPJ de quem paga" no formulário. O documento vai para o contato; se ele já
+for de outro contato (a localização não deixa repetir), segue só na cobrança.
+
 ### Requisitos
 
 * Moeda **BRL** — o Asaas não liquida em outra, e o provedor some do checkout fora dela
