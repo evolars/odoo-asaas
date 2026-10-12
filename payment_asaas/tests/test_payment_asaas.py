@@ -301,6 +301,8 @@ class TestPaymentAsaas(TransactionCase):
         self.assertEqual(digits(partner.vat), "11144477735")
 
     def test_payer_document_already_used_goes_only_to_the_charge(self):
+        if "l10n_br_base" not in self.env["ir.module.module"]._installed():
+            self.skipTest("sem a localização brasileira o CPF pode se repetir entre contatos")
         partner = self.env["res.partner"].create({"name": "Autora Repetida", "email": "rep@example.com"})
         tx = self._transaction(partner=partner, method="pix")
         # O CPF já é da compradora do setUpClass: não cabe no cadastro, vai só na cobrança.

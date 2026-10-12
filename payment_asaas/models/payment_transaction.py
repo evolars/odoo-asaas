@@ -148,15 +148,15 @@ class PaymentTransaction(models.Model):
             vat = "%s.%s.%s/%s-%s" % (digits[:2], digits[2:5], digits[5:8], digits[8:12], digits[12:])
         else:
             raise ValidationError(_("Informe um CPF (11 dígitos) ou um CNPJ (14 dígitos)."))
+        # Sem a localização brasileira nada confere os dígitos ao gravar no contato.
+        if not self._asaas_document_is_valid(digits):
+            raise ValidationError(_("CPF ou CNPJ inválido. Confira os números."))
         try:
             with self.env.cr.savepoint():
                 partner.vat = vat
         except ValidationError:
-            # Documento inválido ou já usado por outro contato (a localização não deixa
-            # repetir CPF): número inválido volta para o comprador; repetido segue só na
-            # cobrança, sem mexer nos cadastros.
-            if not self._asaas_document_is_valid(digits):
-                raise ValidationError(_("CPF ou CNPJ inválido. Confira os números."))
+            # Já usado por outro contato (a localização não deixa repetir CPF): segue
+            # só na cobrança, sem mexer nos cadastros.
             return self.with_context(asaas_payer_document=digits)
         return self
 
