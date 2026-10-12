@@ -25,6 +25,15 @@ class PaymentTransaction(models.Model):
     # Cartão parcelado: o Asaas cria uma cobrança por parcela, todas do mesmo parcelamento.
     asaas_installment_id = fields.Char(string="Parcelamento no Asaas", copy=False, readonly=True, index="btree_not_null")
     asaas_installment_count = fields.Integer(string="Parcelas", copy=False, readonly=True)
+    # A cobrança como o Asaas a mostra (Cobranças → exportar): para conferir vendas e
+    # extrato sem abrir o painel. No parcelado, é a cobrança da primeira parcela.
+    asaas_invoice_number = fields.Char(string="Fatura Asaas", copy=False, readonly=True, index="btree_not_null")
+    asaas_billing_type = fields.Selection(
+        const.BILLING_TYPE_SELECTION, string="Forma de pagamento (Asaas)", copy=False, readonly=True,
+    )
+    asaas_status = fields.Selection(
+        const.CHARGE_STATUS_SELECTION, string="Situação no Asaas", copy=False, readonly=True,
+    )
 
     def _get_specific_processing_values(self, processing_values):
         """Token que autoriza o navegador a criar a cobrança desta transação.
@@ -229,6 +238,47 @@ class PaymentTransaction(models.Model):
         payment = self.provider_id._asaas_get_client().get_payment(self.provider_reference)
         self._handle_notification_data("asaas", payment)
 
+    def _asaas_store_charge_info(self, payment):
+        """Fatura, forma de pagamento e situação da cobrança, como no painel do Asaas.
+
+        Só a cobrança da própria transação conta: as outras parcelas do cartão
+        chegam pelo mesmo webhook e não podem trocar a fatura nem a situação.
+        """
+        self.ensure_one()
+        if payment.get("id") != self.provider_reference:
+            return
+        status = "DELETED" if payment.get("deleted") else (payment.get("status") or "").upper()
+        billing_type = (payment.get("billingType") or "").upper()
+        values = {}
+        if payment.get("invoiceNumber"):
+            values["asaas_invoice_number"] = payment["invoiceNumber"]
+        # Valor novo do Asaas não pode derrubar o webhook: fica de fora até entrar aqui.
+        if billing_type in dict(const.BILLING_TYPE_SELECTION):
+            values["asaas_billing_type"] = billing_type
+        if status in dict(const.CHARGE_STATUS_SELECTION):
+            values["asaas_status"] = status
+        if values:
+            self.write(values)
+
+    def _asaas_fetch_charge_info(self):
+        """Preenche fatura, forma e situação das cobranças que ainda não as têm.
+
+        Para as transações de antes desses campos existirem. Uma consulta por
+        cobrança; sem chave ou sem rede, desiste e deixa os campos vazios.
+        """
+        for tx in self.filtered(lambda t: t.provider_code == "asaas" and t.provider_reference):
+            try:
+                payment = tx.provider_id._asaas_get_client().get_payment(tx.provider_reference)
+            except AsaasError as error:
+                if error.status_code == 404:
+                    continue  # cobrança removida de vez no Asaas
+                _logger.warning("Asaas: cobranças antigas sem fatura e situação (%s).", error)
+                return
+            except Exception:
+                _logger.warning("Asaas: cobranças antigas sem fatura e situação.", exc_info=True)
+                return
+            tx._asaas_store_charge_info(payment)
+
     @staticmethod
     def _asaas_address_number(partner):
         """Número do endereço, que o Asaas exige do titular do cartão."""
@@ -337,6 +387,7 @@ class PaymentTransaction(models.Model):
 
         if not self.provider_reference and notification_data.get("id"):
             self.provider_reference = notification_data["id"]
+        self._asaas_store_charge_info(notification_data)
 
         status = (notification_data.get("status") or "").upper()
         if not status:

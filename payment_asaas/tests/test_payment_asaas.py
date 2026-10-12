@@ -383,6 +383,86 @@ class TestPaymentAsaas(TransactionCase):
         self._notify(tx, "SITUACAO_QUE_NAO_EXISTE")
         self.assertEqual(tx.state, "error")
 
+    # ------------------------------------------------------------------ #
+    # Fatura, forma e situação, como no painel do Asaas                   #
+    # ------------------------------------------------------------------ #
+
+    def test_charge_info_follows_the_asaas_panel(self):
+        tx = self._transaction()
+        tx._handle_notification_data("asaas", {
+            "id": "pay_pix", "status": "PENDING", "billingType": "PIX",
+            "invoiceNumber": "00012345", "externalReference": tx.reference,
+        })
+        self.assertEqual(tx.asaas_invoice_number, "00012345")
+        self.assertEqual(tx.asaas_billing_type, "PIX")
+        self.assertEqual(tx.asaas_status, "PENDING")
+        tx._handle_notification_data("asaas", {
+            "id": "pay_pix", "status": "RECEIVED", "billingType": "PIX",
+            "invoiceNumber": "00012345", "externalReference": tx.reference,
+        })
+        self.assertEqual(tx.asaas_status, "RECEIVED")
+        self.assertEqual(dict(tx._fields["asaas_status"].selection)["RECEIVED"], "Recebida")
+
+    def test_paid_card_keeps_following_the_charge(self):
+        """Cartão já pago passa de Confirmada a Recebida quando o dinheiro cai."""
+        tx = self._transaction()
+        self._notify(tx, "CONFIRMED")
+        self.assertEqual((tx.state, tx.asaas_status), ("done", "CONFIRMED"))
+        self._notify(tx, "RECEIVED")
+        self.assertEqual((tx.state, tx.asaas_status), ("done", "RECEIVED"))
+
+    def test_deleted_charge_shows_as_removed(self):
+        tx = self._transaction()
+        self._notify(tx, "PENDING")
+        tx._handle_notification_data("asaas", {
+            "id": "pay_999", "status": "PENDING", "deleted": True, "externalReference": tx.reference,
+        })
+        self.assertEqual(tx.asaas_status, "DELETED")
+
+    def test_unknown_billing_type_does_not_break_the_webhook(self):
+        tx = self._transaction()
+        tx._handle_notification_data("asaas", {
+            "id": "pay_novo", "status": "CONFIRMED", "billingType": "FORMA_NOVA",
+            "externalReference": tx.reference,
+        })
+        self.assertEqual((tx.state, tx.asaas_status), ("done", "CONFIRMED"))
+        self.assertFalse(tx.asaas_billing_type)
+
+    def test_other_installment_does_not_overwrite_the_charge(self):
+        tx = self._transaction()
+        tx.write({"provider_reference": "pay_parc_1", "asaas_installment_id": "ins_1"})
+        tx._handle_notification_data("asaas", {
+            "id": "pay_parc_1", "status": "CONFIRMED", "installment": "ins_1",
+            "billingType": "CREDIT_CARD", "invoiceNumber": "0001",
+        })
+        tx._handle_notification_data("asaas", {
+            "id": "pay_parc_2", "status": "PENDING", "installment": "ins_1",
+            "billingType": "CREDIT_CARD", "invoiceNumber": "0002",
+        })
+        self.assertEqual((tx.asaas_invoice_number, tx.asaas_status), ("0001", "CONFIRMED"))
+
+    def test_old_charges_are_filled_from_the_api(self):
+        tx = self._transaction()
+        tx.provider_reference = "pay_antiga"
+        payment = {"id": "pay_antiga", "status": "OVERDUE", "billingType": "BOLETO",
+                   "invoiceNumber": "00000077"}
+        with patch.object(AsaasClient, "get_payment", return_value=payment):
+            tx._asaas_fetch_charge_info()
+        self.assertEqual(
+            (tx.asaas_invoice_number, tx.asaas_billing_type, tx.asaas_status),
+            ("00000077", "BOLETO", "OVERDUE"),
+        )
+        self.assertEqual(tx.state, "draft", "preencher a situação não mexe no estado da transação")
+
+    def test_filling_old_charges_gives_up_without_network(self):
+        txs = self._transaction() | self._transaction()
+        txs[0].provider_reference, txs[1].provider_reference = "pay_a", "pay_b"
+        with patch.object(AsaasClient, "get_payment",
+                          side_effect=AsaasError("Não foi possível conectar ao Asaas.")) as get:
+            txs._asaas_fetch_charge_info()
+        self.assertEqual(get.call_count, 1)
+        self.assertFalse(any(txs.mapped("asaas_status")))
+
     def test_transaction_is_found_by_external_reference(self):
         tx = self._transaction()
         found = self.env["payment.transaction"]._get_tx_from_notification_data(

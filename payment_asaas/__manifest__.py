@@ -1,6 +1,6 @@
 {
     "name": "Asaas - Provedor de Pagamento",
-    "version": "18.0.1.4.0",
+    "version": "18.0.1.5.0",
     "category": "Accounting/Payment Providers",
     "summary": "Receber Pix, boleto e cartão pelo Asaas no checkout do site",
     "description": """
@@ -12,6 +12,10 @@ cobrado na hora (os dados vão direto para o Asaas, sem ficar gravados); Pix e
 boleto deixam o pedido pendente e a confirmação do pedido mostra o QR Code, o
 "copia e cola" ou a linha digitável, atualizando sozinha quando o pagamento cai.
 O que confirma Pix e boleto é o **webhook** (a página também consulta o Asaas).
+
+A transação guarda a cobrança como o painel do Asaas a mostra: número da fatura,
+forma de pagamento e situação (Aguardando pagamento, Confirmada, Recebida,
+Vencida...), atualizados pelo webhook.
 
 O fluxo de redirecionamento (`billingType: UNDEFINED`, página do Asaas) continua
 disponível para quem chamar a transação nesse fluxo.
@@ -33,6 +37,7 @@ Sandbox, onde as cobranças são aprovadas automaticamente e nada é movimentado
     "data": [
         "views/payment_asaas_templates.xml",
         "views/payment_provider_views.xml",
+        "views/payment_transaction_views.xml",
         "data/payment_provider_data.xml",  # depende das views dos formulários
         "data/payment_asaas_setup.xml",
     ],
