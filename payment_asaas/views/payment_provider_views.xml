@@ -9,7 +9,7 @@
             <group name="provider_credentials" position="inside">
                 <group invisible="code != 'asaas'">
                     <field name="asaas_api_key" password="True"
-                           required="code == 'asaas' and state != 'disabled'"/>
+                           placeholder="Vazia: usa a de Configurações → Asaas"/>
                     <div colspan="2" class="text-muted">
                         O ambiente acompanha o estado acima: <b>Teste</b> fala com o Sandbox
                         (<code>$aact_hmlg_…</code>) e <b>Ativado</b> com a produção
@@ -19,6 +19,8 @@
                         confirma o pagamento. Pix e boleto são pagos depois que o comprador
                         já saiu do site.
                     </div>
+                    <field name="asaas_max_installments"/>
+                    <field name="asaas_min_installment_amount" invisible="asaas_max_installments &lt;= 1"/>
                     <div colspan="2">
                         <button name="action_asaas_test_connection" type="object"
                                 string="Testar conexão" class="btn-link ps-0" icon="fa-plug"/>

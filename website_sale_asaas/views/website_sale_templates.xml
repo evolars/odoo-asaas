@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Pix e boleto se pagam na própria confirmação do pedido: QR Code ou linha
+         digitável, atualizando quando o pagamento cai. Vale para qualquer pedido do
+         site, inclusive curso comprado pelo eLearning. -->
+    <template id="payment_confirmation_status" inherit_id="website_sale.payment_confirmation_status">
+        <xpath expr="//div[@name='order_confirmation']" position="inside">
+            <t t-call="payment_asaas.transaction_instructions">
+                <t t-set="tx" t-value="tx_sudo"/>
+            </t>
+        </xpath>
+    </template>
+
+</odoo>

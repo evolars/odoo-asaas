@@ -17,3 +17,20 @@ PAYMENT_STATUS_MAPPING = {
 
 # Quantos dias o boleto/Pix fica de pé antes de vencer.
 DEFAULT_DUE_DAYS = 3
+
+# Método do checkout -> `billingType` da cobrança. Cada método gera a cobrança
+# já no tipo certo, para mostrar o Pix, o boleto ou cobrar o cartão no próprio site.
+BILLING_TYPE_MAPPING = {
+    "pix": "PIX",
+    "boleto": "BOLETO",
+    "card": "CREDIT_CARD",
+}
+
+# Texto da transação pendente (Pix ou boleto à espera do pagamento).
+PENDING_MSG = (
+    "<p>Pedido recebido. Assim que o pagamento for confirmado, o pedido segue para "
+    "separação e você recebe um e-mail.</p>"
+)
+
+# O Asaas recusa parcela de cartão abaixo de R$ 5.
+MIN_INSTALLMENT_VALUE = 5.0

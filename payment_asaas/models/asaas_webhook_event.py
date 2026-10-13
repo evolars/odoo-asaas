@@ -26,14 +26,12 @@ class AsaasWebhookEvent(models.Model):
         if event not in RELEVANT_EVENTS or not payment:
             return handled
 
-        Transaction = self.env["payment.transaction"].sudo()
-        try:
-            tx = Transaction._get_tx_from_notification_data("asaas", payment)
-        except Exception:
+        tx = self.env["payment.transaction"].sudo()._search_by_reference("asaas", payment)
+        if not tx:
             # Cobrança criada fora da loja (faturamento, assinatura) não tem
             # transação — é caso normal, não erro.
             _logger.debug("Asaas: %s sem transação correspondente (%s).", event, payment.get("id"))
             return handled
 
-        tx._handle_notification_data("asaas", payment)
+        tx._process("asaas", payment)
         return True

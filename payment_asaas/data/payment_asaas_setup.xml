@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Roda a cada atualização: o registro do provedor é noupdate. -->
+    <function model="payment.provider" name="_asaas_setup_checkout"/>
+</odoo>

@@ -1,6 +1,6 @@
 # Odoo Asaas
 
-Integração do [Asaas](https://www.asaas.com) com Odoo 18, em módulos separados para poderem ser
+Integração do [Asaas](https://www.asaas.com) com Odoo 19, em módulos separados para poderem ser
 combinados conforme o cliente precisa.
 
 Propriedade da **Evolars LTDA**.
@@ -13,6 +13,7 @@ Propriedade da **Evolars LTDA**.
 |---|---|---|---|
 | `asaas_base` | Cliente da API v3, credenciais, recepção autenticada de webhooks | `base_setup` | OPL-1 |
 | `payment_asaas` | Provedor de pagamento para o checkout do site | `payment`, `asaas_base` | OPL-1 |
+| `website_sale_asaas` | Pix e boleto na confirmação da loja (instala sozinho) | `website_sale`, `payment_asaas` | OPL-1 |
 | `evolars_asaas` | Cobranças, assinaturas, splits, reembolsos e transferências | `account`, `contract`, `asaas_base` | AGPL-3 |
 
 Instale só o que for usar. Uma loja que apenas recebe pelo site quer `payment_asaas`; uma
@@ -87,14 +88,26 @@ class AsaasWebhookEvent(models.Model):
 
 ## `payment_asaas`
 
-Provedor de redirecionamento para `website_sale` e portal.
+Checkout transparente para `website_sale` e portal: o comprador paga sem sair do site.
 
 1. Garante o cliente no Asaas a partir do `res.partner` (usa o `asaas_customer_id` do base, sem
    gastar chamada quando já existe)
-2. Cria a cobrança com `billingType: UNDEFINED` — Pix, boleto e cartão ficam à escolha do
-   comprador na página do Asaas
-3. Redireciona para o `invoiceUrl`
+2. Cria a cobrança já no tipo do método escolhido (fluxo direto do Odoo, rota
+   `/payment/asaas/charge`, autorizada por token HMAC da transação)
+3. **Cartão**: cobrado na hora; a recusa aparece na tela. Os dados vão direto ao Asaas, sem ficar
+   gravados. **Pix/boleto**: a transação fica pendente e a página de destino mostra o QR Code e o
+   "copia e cola" ou o PDF e a linha digitável (`payment_asaas.transaction_instructions`),
+   consultando `/payment/asaas/poll` a cada 5 s e recarregando quando o pagamento cai
 4. O **webhook** confirma o pagamento
+
+Onde o Pix/boleto aparece: no cabeçalho de status do `payment` (fatura e pedido no portal,
+`/payment/confirmation`) e, com o `website_sale_asaas` (instalado sozinho junto do
+`website_sale`), na confirmação da loja `/shop/confirmation` — inclusive curso do eLearning
+(`website_sale_slides`). Outro módulo pode chamar o template onde quiser, passando `tx`.
+
+O fluxo de redirecionamento (`billingType: UNDEFINED`, página do Asaas) continua no código para
+quem chamar a transação nesse fluxo. Conta sem site cadastrado no Asaas (Minha Conta →
+Informações) recusa o `callback`; nesse caso a cobrança é criada sem a volta automática.
 
 O passo 4 é o que vale. A volta do navegador não decide nada: no Pix e no boleto o dinheiro cai
 depois que o comprador já fechou a aba, e ele pode nunca ser redirecionado. Sem o webhook
@@ -103,6 +116,38 @@ registrado, os pedidos ficam pendentes para sempre.
 O ambiente segue o **estado do provedor**, não as Configurações: provedor em *Teste* bate no
 Sandbox, sempre. Não existe combinação de configuração que faça um provedor de teste emitir
 cobrança de verdade.
+
+A chave do provedor é opcional: vazia, vale a de Configurações → Asaas, **desde que seja do
+mesmo ambiente** (provedor *Ativado* com Configurações em Produção, *Teste* com Sandbox). Antes
+ela era obrigatória no provedor, e uma loja com a conta pronta em Configurações ficava sem
+pagamento no checkout.
+
+### Cartão parcelado
+
+No provedor, *Parcelas no cartão (máximo)* e *Parcela mínima*. O formulário do cartão mostra
+"3x de R$ 100,00 sem juros" até o máximo, enquanto a parcela não ficar abaixo da mínima (e nunca
+abaixo de R$ 5, limite do Asaas). A cobrança vai com `installmentCount` e `totalValue`; o Asaas
+cria uma cobrança por parcela, todas do mesmo parcelamento (`installment`), e o webhook de
+qualquer parcela encontra a transação por ele. Padrão: 1, só à vista. A taxa do parcelamento é
+descontada pelo Asaas de quem vende: "sem juros" é para o comprador.
+
+### CPF/CNPJ no pagamento
+
+Quem paga sem documento no cadastro (proposta paga pelo portal, que não passa pelo checkout)
+vê o campo "CPF ou CNPJ de quem paga" no formulário. O documento vai para o contato; se ele já
+for de outro contato (a localização não deixa repetir), segue só na cobrança. O número é
+conferido pelos dígitos verificadores aqui mesmo, com ou sem a localização brasileira.
+
+### Pagador estrangeiro
+
+Contato com país diferente de Brasil vai ao Asaas como `foreignCustomer`, sem `cpfCnpj`, CEP e UF;
+o checkout não pede CPF/CNPJ dele.
+
+### Odoo 19
+
+* O `payment` do 19 confere o valor da cobrança (`value`) com o da transação; diferente vira
+  erro. Parcela de cartão parcelado não é conferida (cada uma chega com o valor dela).
+* O contato não tem mais `mobile`: o celular vai só se algum módulo trouxer o campo de volta.
 
 ### Requisitos
 
@@ -162,6 +207,7 @@ E em `custom/src/addons.yaml`:
 odoo-asaas:
   - asaas_base
   - payment_asaas
+  - website_sale_asaas   # se tiver loja (website_sale); entra sozinho, mas o Doodba precisa listá-lo
   - evolars_asaas   # só se o cliente usar cobrança recorrente/faturamento
 ```
 
@@ -173,14 +219,15 @@ O repositório é privado; o `Dockerfile` do Doodba já recebe `GH_TOKEN` na eta
 
 ```bash
 docker run --rm --network <rede> -v "$PWD":/mnt/extra-addons:ro \
-  -e HOST=<db> -e USER=odoo -e PASSWORD=odoo odoo:18.0 \
+  -e HOST=<db> -e USER=odoo -e PASSWORD=odoo odoo:19.0 \
   odoo -d asaas_test --addons-path=/mnt/extra-addons,/usr/lib/python3/dist-packages/odoo/addons \
-  -i asaas_base,payment_asaas --test-enable --test-tags /asaas_base,/payment_asaas \
-  --stop-after-init --without-demo=all
+  -i asaas_base,payment_asaas,website_sale --test-enable \
+  --test-tags /asaas_base,/payment_asaas,/website_sale_asaas \
+  --stop-after-init --without-demo=True
 ```
 
 Para incluir o `evolars_asaas` é preciso ter o `contract` da OCA no `--addons-path`.
-São **43 testes** no total.
+São **54 testes** sem o `evolars_asaas` (11 do base, 42 do provedor, 1 da loja) e 73 com ele.
 
 Nenhum teste toca a rede: as chamadas são interceptadas. Cobrem o envio das credenciais e do
 `User-Agent`, tradução de erro da API, o corpo enviado ao criar a cobrança, o mapeamento de

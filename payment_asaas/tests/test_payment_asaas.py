@@ -1,9 +1,9 @@
 from unittest.mock import patch
 
-from odoo.exceptions import ValidationError
+from odoo.exceptions import UserError, ValidationError
 from odoo.tests import TransactionCase, tagged
 
-from odoo.addons.asaas_base.models.asaas_client import AsaasClient
+from odoo.addons.asaas_base.models.asaas_client import AsaasClient, AsaasError
 
 
 @tagged("post_install", "-at_install", "payment_asaas")
@@ -24,10 +24,13 @@ class TestPaymentAsaas(TransactionCase):
             "zip": "01310-100",
         })
 
-    def _transaction(self, partner=None, amount=38.0):
+    def _transaction(self, partner=None, amount=38.0, method=None):
+        payment_method = self.provider.payment_method_ids[:1]
+        if method:
+            payment_method = self.env.ref("payment.payment_method_%s" % method)
         return self.env["payment.transaction"].create({
             "provider_id": self.provider.id,
-            "payment_method_id": self.provider.payment_method_ids[:1].id,
+            "payment_method_id": payment_method.id,
             "partner_id": (partner or self.partner).id,
             "amount": amount,
             "currency_id": self.brl.id,
@@ -44,6 +47,34 @@ class TestPaymentAsaas(TransactionCase):
         self.assertTrue(self.provider._asaas_get_client().sandbox)
         self.provider.state = "enabled"
         self.assertFalse(self.provider._asaas_get_client().sandbox)
+
+    def _global_key(self, api_key, environment):
+        params = self.env["ir.config_parameter"].sudo()
+        params.set_param("asaas.api_key", api_key)
+        params.set_param("asaas.environment", environment)
+
+    def test_empty_provider_key_uses_the_settings_key(self):
+        """A chave colada só em Configurações → Asaas basta para o checkout."""
+        self.provider.write({"asaas_api_key": False, "state": "enabled"})
+        self._global_key("$aact_prod_global", "production")
+        client = self.provider._asaas_get_client()
+        self.assertEqual(client.api_key, "$aact_prod_global")
+        self.assertFalse(client.sandbox)
+
+    def test_provider_key_wins_over_the_settings_key(self):
+        self._global_key("$aact_hmlg_global", "sandbox")
+        self.assertEqual(self.provider._asaas_get_client().api_key, "$aact_hmlg_test")
+
+    def test_settings_key_from_another_environment_is_never_used(self):
+        """Provedor em teste com chave de produção nas Configurações: nada de cobrança real."""
+        self.provider.asaas_api_key = False
+        self._global_key("$aact_prod_global", "production")
+        with self.assertRaises(UserError):
+            self.provider._asaas_get_client()
+
+    def test_provider_can_be_enabled_without_its_own_key(self):
+        self.provider.write({"asaas_api_key": False, "state": "enabled", "is_published": True})
+        self.assertEqual(self.provider.state, "enabled")
 
     def test_only_brl_is_supported(self):
         names = self.provider._get_supported_currencies().mapped("name")
@@ -77,6 +108,42 @@ class TestPaymentAsaas(TransactionCase):
         self.assertEqual(payload["externalReference"], tx.reference)
         self.assertTrue(payload["callback"]["successUrl"].endswith("/payment/status"))
 
+    def test_account_without_domain_still_gets_the_charge(self):
+        """Conta sem site cadastrado recusa o `callback`: a venda não pode morrer por isso."""
+        tx = self._transaction()
+        recusa = AsaasError("recusado", status_code=400, payload={"errors": [{
+            "code": "invalid_object",
+            "description": "Não há nenhum domínio configurado em sua conta. Cadastre um "
+                           "site em Minha Conta na aba Informações.",
+        }]})
+        enviados = []
+
+        def create_payment(client, payload):
+            enviados.append(dict(payload))
+            if "callback" in payload:
+                raise recusa
+            return {"id": "pay_9", "invoiceUrl": "https://www.asaas.com/i/pay_9"}
+
+        with patch.object(AsaasClient, "create_customer", return_value={"id": "cus_1"}), \
+             patch.object(AsaasClient, "create_payment", autospec=True, side_effect=create_payment):
+            values = tx._get_specific_rendering_values({})
+
+        self.assertEqual(values["api_url"], "https://www.asaas.com/i/pay_9")
+        self.assertEqual(len(enviados), 2)
+        self.assertNotIn("callback", enviados[1])
+        self.assertEqual(enviados[1]["externalReference"], tx.reference,
+                         "o webhook acha a transação pela referência")
+
+    def test_other_refusals_still_raise(self):
+        tx = self._transaction()
+        recusa = AsaasError("recusado", status_code=400, payload={"errors": [{
+            "code": "invalid_value", "description": "Valor inválido."}]})
+        with patch.object(AsaasClient, "create_customer", return_value={"id": "cus_1"}), \
+             patch.object(AsaasClient, "create_payment", side_effect=recusa) as create:
+            with self.assertRaises(AsaasError):
+                tx._get_specific_rendering_values({})
+        self.assertEqual(create.call_count, 1)
+
     def test_customer_without_document_fails_with_a_useful_message(self):
         sem_documento = self.env["res.partner"].create({"name": "Sem CPF"})
         tx = self._transaction(partner=sem_documento)
@@ -92,11 +159,260 @@ class TestPaymentAsaas(TransactionCase):
                 tx._get_specific_rendering_values({})
 
     # ------------------------------------------------------------------ #
+    # Checkout transparente                                               #
+    # ------------------------------------------------------------------ #
+
+    CARD = {"number": "5162 3060 0482 9866", "holder": "COMPRADORA TESTE",
+            "expiry": "05/30", "cvv": "318", "holder_document": ""}
+
+    def test_provider_uses_the_inline_form(self):
+        self.assertEqual(self.provider.inline_form_view_id,
+                         self.env.ref("payment_asaas.inline_form"))
+
+    def test_setup_fixes_old_pending_text_and_card_label(self):
+        self.provider.pending_msg = "<p>Cobrança gerada no Asaas.</p>"
+        self.provider._asaas_setup_checkout()
+        self.assertNotIn("Asaas", self.provider.pending_msg)
+        self.assertIn("Pedido recebido", self.provider.pending_msg)
+
+    def test_processing_values_carry_an_access_token_for_this_transaction(self):
+        tx = self._transaction(method="pix")
+        token = tx._get_specific_processing_values({})["asaas_access_token"]
+        self.assertTrue(tx._asaas_check_access_token(token))
+        other = self._transaction(method="pix")
+        self.assertFalse(other._asaas_check_access_token(token))
+
+    def test_pix_charge_shows_the_qr_code_on_the_site(self):
+        tx = self._transaction(method="pix")
+        with patch.object(AsaasClient, "create_customer", return_value={"id": "cus_1"}), \
+             patch.object(AsaasClient, "create_payment", return_value={
+                 "id": "pay_pix", "status": "PENDING", "externalReference": tx.reference,
+             }) as create, \
+             patch.object(AsaasClient, "get_pix_qrcode", return_value={
+                 "encodedImage": "iVBORw0KGgo=", "payload": "00020126pix",
+                 "expirationDate": "2026-10-08 23:59:59",
+             }):
+            tx._asaas_create_direct_charge()
+
+        payload = create.call_args[0][0]
+        self.assertEqual(payload["billingType"], "PIX")
+        self.assertNotIn("callback", payload, "ninguém sai do site")
+        self.assertEqual(tx.provider_reference, "pay_pix")
+        self.assertEqual(tx.state, "pending")
+        self.assertEqual(tx.asaas_pix_payload, "00020126pix")
+        self.assertEqual(tx.asaas_pix_qr_code, "iVBORw0KGgo=")
+
+    def test_pending_pix_renders_qr_code_and_copy_code(self):
+        tx = self._transaction(method="pix")
+        tx.write({"asaas_pix_qr_code": "iVBORw0KGgo=", "asaas_pix_payload": "00020126pix",
+                  "provider_reference": "pay_pix"})
+        tx._set_pending()
+        html = str(self.env["ir.qweb"]._render("payment_asaas.transaction_instructions", {"tx": tx}))
+        self.assertIn("data:image/png;base64,iVBORw0KGgo=", html)
+        self.assertIn("00020126pix", html)
+        self.assertIn(tx._asaas_access_token(), html)
+        tx._set_done()
+        html = str(self.env["ir.qweb"]._render("payment_asaas.transaction_instructions", {"tx": tx}))
+        self.assertNotIn("00020126pix", html, "pago, não mostra mais como pagar")
+
+    def test_pending_pix_shows_on_the_portal_status_header(self):
+        """Fatura e pedido no portal chamam `payment.state_header`: o Pix aparece ali."""
+        tx = self._transaction(method="pix")
+        tx.write({"asaas_pix_payload": "00020126pix", "provider_reference": "pay_pix"})
+        tx._set_pending()
+        html = str(self.env["ir.qweb"]._render("payment.state_header", {"tx": tx}))
+        self.assertIn("00020126pix", html)
+        self.assertIn("o_asaas_instructions", html)
+        # A página /payment/status só espera e segue para o destino: lá não aparece.
+        html = str(self.env["ir.qweb"]._render(
+            "payment.state_header", {"tx": tx, "is_processing": True}))
+        self.assertNotIn("o_asaas_instructions", html)
+
+    def test_boleto_charge_keeps_pdf_and_digitable_line(self):
+        tx = self._transaction(method="boleto")
+        with patch.object(AsaasClient, "create_customer", return_value={"id": "cus_1"}), \
+             patch.object(AsaasClient, "create_payment", return_value={
+                 "id": "pay_bol", "status": "PENDING", "bankSlipUrl": "https://asaas/b.pdf",
+             }) as create, \
+             patch.object(AsaasClient, "get_identification_field", return_value={
+                 "identificationField": "00190000090281913600966281313335889830000038000",
+             }):
+            tx._asaas_create_direct_charge()
+        self.assertEqual(create.call_args[0][0]["billingType"], "BOLETO")
+        self.assertEqual(tx.state, "pending")
+        self.assertEqual(tx.asaas_boleto_url, "https://asaas/b.pdf")
+        self.assertTrue(tx.asaas_boleto_line.startswith("0019"))
+
+    def test_card_charge_is_paid_on_the_spot(self):
+        tx = self._transaction(method="card")
+        with patch.object(AsaasClient, "create_customer", return_value={"id": "cus_1"}), \
+             patch.object(AsaasClient, "create_payment", return_value={
+                 "id": "pay_card", "status": "CONFIRMED",
+             }) as create:
+            tx._asaas_create_direct_charge(card=dict(self.CARD), remote_ip="200.1.2.3")
+
+        payload = create.call_args[0][0]
+        self.assertEqual(payload["billingType"], "CREDIT_CARD")
+        self.assertEqual(payload["creditCard"]["number"], "5162306004829866")
+        self.assertEqual(payload["creditCard"]["expiryMonth"], "05")
+        self.assertEqual(payload["creditCard"]["expiryYear"], "2030")
+        self.assertEqual(payload["creditCardHolderInfo"]["cpfCnpj"], "52998224725",
+                         "sem CPF do titular, vale o do comprador")
+        self.assertEqual(payload["creditCardHolderInfo"]["postalCode"], "01310100")
+        self.assertEqual(payload["remoteIp"], "200.1.2.3")
+        self.assertEqual(tx.state, "done")
+
+    def test_card_charge_for_a_reader_abroad(self):
+        """Leitora em Portugal: sem CPF, entra no Asaas como pagadora estrangeira."""
+        reader = self.env["res.partner"].create({
+            "name": "Leitora Portuguesa", "email": "leitora@example.pt",
+            "country_id": self.env.ref("base.pt").id, "city": "Lisboa", "zip": "1100-148",
+            "street": "Rua Augusta, 27", "vat": "CC 12345678 9 ZZ1",
+        })
+        tx = self._transaction(partner=reader, method="card")
+        with patch.object(AsaasClient, "create_customer", return_value={"id": "cus_pt"}) as customer, \
+             patch.object(AsaasClient, "create_payment", return_value={
+                 "id": "pay_pt", "status": "CONFIRMED",
+             }) as create:
+            tx._asaas_create_direct_charge(card=dict(self.CARD))
+
+        customer_payload = customer.call_args[0][0]
+        self.assertTrue(customer_payload["foreignCustomer"])
+        self.assertNotIn("cpfCnpj", customer_payload, "documento de fora não é CPF")
+        self.assertNotIn("cpfCnpj", create.call_args[0][0]["creditCardHolderInfo"])
+        self.assertEqual(tx.state, "done")
+
+    def test_reader_abroad_pays_without_any_document(self):
+        reader = self.env["res.partner"].create({
+            "name": "Reader Abroad", "country_id": self.env.ref("base.pt").id})
+        tx = self._transaction(partner=reader, method="card")
+        with patch.object(AsaasClient, "create_customer", return_value={"id": "cus_x"}), \
+             patch.object(AsaasClient, "create_payment", return_value={
+                 "id": "pay_x", "status": "CONFIRMED",
+             }):
+            tx._asaas_create_direct_charge(card=dict(self.CARD))
+        self.assertEqual(tx.state, "done")
+
+    def test_installment_counts_follow_max_and_minimum(self):
+        self.provider.write({"asaas_max_installments": 12, "asaas_min_installment_amount": 100.0})
+        self.assertEqual(self.provider._asaas_installment_counts(90.0), [1])
+        self.assertEqual(self.provider._asaas_installment_counts(350.0), [1, 2, 3])
+        self.assertEqual(self.provider._asaas_installment_counts(9800.0), list(range(1, 13)))
+        self.provider.asaas_max_installments = 1
+        self.assertEqual(self.provider._asaas_installment_counts(9800.0), [1])
+
+    def test_card_in_installments_sends_count_and_total(self):
+        self.provider.write({"asaas_max_installments": 12, "asaas_min_installment_amount": 100.0})
+        tx = self._transaction(method="card", amount=9800.0)
+        with patch.object(AsaasClient, "create_customer", return_value={"id": "cus_1"}), \
+             patch.object(AsaasClient, "create_payment", return_value={
+                 "id": "pay_parc_1", "status": "CONFIRMED", "installment": "ins_1",
+             }) as create:
+            tx._asaas_create_direct_charge(card=dict(self.CARD, installments="10"))
+        payload = create.call_args[0][0]
+        self.assertEqual(payload["installmentCount"], 10)
+        self.assertEqual(payload["totalValue"], 9800.0)
+        self.assertNotIn("value", payload)
+        self.assertEqual(tx.asaas_installment_id, "ins_1")
+        self.assertEqual(tx.asaas_installment_count, 10)
+        self.assertEqual(tx.state, "done")
+        # O webhook de outra parcela (outro id, sem a referência) cai na mesma transação.
+        found = self.env["payment.transaction"]._search_by_reference(
+            "asaas", {"id": "pay_parc_2", "installment": "ins_1", "status": "CONFIRMED"})
+        self.assertEqual(found, tx)
+
+    def test_installments_above_the_limit_are_refused(self):
+        self.provider.write({"asaas_max_installments": 3, "asaas_min_installment_amount": 100.0})
+        tx = self._transaction(method="card", amount=250.0)
+        with patch.object(AsaasClient, "create_customer", return_value={"id": "cus_1"}), \
+             patch.object(AsaasClient, "create_payment") as create:
+            with self.assertRaises(ValidationError):
+                tx._asaas_create_direct_charge(card=dict(self.CARD, installments="3"))
+        create.assert_not_called()
+
+    def test_payer_without_document_informs_it_at_payment(self):
+        partner = self.env["res.partner"].create({"name": "Autora Sem CPF", "email": "autora@example.com"})
+        tx = self._transaction(partner=partner, method="pix")
+        with self.assertRaises(ValidationError):
+            tx._asaas_set_payer_document("123")
+        with self.assertRaises(ValidationError):
+            tx._asaas_set_payer_document("111.444.777-00")  # dígito verificador errado
+        digits = lambda value: "".join(c for c in value or "" if c.isdigit())
+        tx._asaas_set_payer_document("111.444.777-35")
+        self.assertEqual(digits(partner.vat), "11144477735")
+        # Quem já tem documento não é alterado pelo campo.
+        tx._asaas_set_payer_document("11.222.333/0001-81")
+        self.assertEqual(digits(partner.vat), "11144477735")
+
+    def test_payer_document_already_used_goes_only_to_the_charge(self):
+        partner = self.env["res.partner"].create({"name": "Autora Repetida", "email": "rep@example.com"})
+        tx = self._transaction(partner=partner, method="pix")
+        # O CPF já é da compradora do setUpClass: a localização recusa repetir (simulado
+        # aqui, para não depender dela), e o documento vai só na cobrança.
+        Partner = type(partner)
+        original_write = Partner.write
+
+        def write(records, vals):
+            if "vat" in vals:
+                raise ValidationError("CPF/CNPJ já usado em outro contato.")
+            return original_write(records, vals)
+
+        with patch.object(Partner, "write", write):
+            charged = tx._asaas_set_payer_document("529.982.247-25")
+        self.assertFalse(partner.vat)
+        with patch.object(AsaasClient, "create_customer", return_value={"id": "cus_rep"}) as customer, \
+             patch.object(AsaasClient, "create_payment", return_value={"id": "pay_rep", "status": "PENDING"}), \
+             patch.object(AsaasClient, "get_pix_qrcode", return_value={"encodedImage": "x", "payload": "y"}):
+            charged._asaas_create_direct_charge()
+        self.assertEqual(customer.call_args[0][0]["cpfCnpj"], "52998224725")
+
+    def test_card_without_installments_is_a_single_charge(self):
+        tx = self._transaction(method="card", amount=9800.0)
+        with patch.object(AsaasClient, "create_customer", return_value={"id": "cus_1"}), \
+             patch.object(AsaasClient, "create_payment", return_value={
+                 "id": "pay_card", "status": "CONFIRMED"}) as create:
+            tx._asaas_create_direct_charge(card=dict(self.CARD))
+        payload = create.call_args[0][0]
+        self.assertEqual(payload["value"], 9800.0)
+        self.assertNotIn("installmentCount", payload)
+
+    def test_refused_card_marks_the_transaction_as_error(self):
+        tx = self._transaction(method="card")
+        recusa = AsaasError("Transação não autorizada.", status_code=400, payload={})
+        with patch.object(AsaasClient, "create_customer", return_value={"id": "cus_1"}), \
+             patch.object(AsaasClient, "create_payment", side_effect=recusa):
+            # Sem assertRaises: ele desfaz o savepoint, e o erro gravado é o que se testa
+            # (a rota devolve a mensagem sem exceção, então o erro fica gravado).
+            try:
+                tx._asaas_create_direct_charge(card=dict(self.CARD))
+            except AsaasError:
+                pass
+            else:
+                self.fail("cartão recusado tem que levantar AsaasError")
+        self.assertEqual(tx.state, "error")
+        self.assertIn("não autorizada", tx.state_message)
+
+    def test_incomplete_card_is_refused_before_calling_asaas(self):
+        tx = self._transaction(method="card")
+        with patch.object(AsaasClient, "create_customer", return_value={"id": "cus_1"}), \
+             patch.object(AsaasClient, "create_payment") as create:
+            with self.assertRaises(ValidationError):
+                tx._asaas_create_direct_charge(card={"number": "4111", "holder": "X"})
+        create.assert_not_called()
+
+    def test_second_call_does_not_create_a_second_charge(self):
+        tx = self._transaction(method="pix")
+        tx.provider_reference = "pay_ja_existe"
+        with patch.object(AsaasClient, "create_payment") as create:
+            tx._asaas_create_direct_charge()
+        create.assert_not_called()
+
+    # ------------------------------------------------------------------ #
     # Retorno de situação                                                 #
     # ------------------------------------------------------------------ #
 
     def _notify(self, tx, status):
-        tx._handle_notification_data("asaas", {
+        tx._process("asaas", {
             "id": "pay_999", "status": status, "externalReference": tx.reference,
         })
 
@@ -123,16 +439,35 @@ class TestPaymentAsaas(TransactionCase):
 
     def test_transaction_is_found_by_external_reference(self):
         tx = self._transaction()
-        found = self.env["payment.transaction"]._get_tx_from_notification_data(
+        found = self.env["payment.transaction"]._search_by_reference(
             "asaas", {"id": "pay_outro", "externalReference": tx.reference},
         )
         self.assertEqual(found, tx)
 
-    def test_notification_without_matching_transaction_raises(self):
-        with self.assertRaises(ValidationError):
-            self.env["payment.transaction"]._get_tx_from_notification_data(
-                "asaas", {"id": "pay_inexistente", "externalReference": "nao-existe"},
-            )
+    def test_notification_without_matching_transaction_finds_nothing(self):
+        """No 19 a busca devolve vazio (não levanta): o webhook ignora a cobrança."""
+        found = self.env["payment.transaction"]._search_by_reference(
+            "asaas", {"id": "pay_inexistente", "externalReference": "nao-existe"},
+        )
+        self.assertFalse(found)
+
+    def test_amount_from_asaas_must_match_the_transaction(self):
+        """O `payment` do 19 confere o valor; cobrança com valor diferente vira erro."""
+        tx = self._transaction(amount=38.0)
+        tx._process("asaas", {"id": "pay_1", "status": "RECEIVED", "value": 38.0,
+                              "externalReference": tx.reference})
+        self.assertEqual(tx.state, "done")
+        other = self._transaction(amount=38.0)
+        other._process("asaas", {"id": "pay_2", "status": "RECEIVED", "value": 10.0,
+                                 "externalReference": other.reference})
+        self.assertEqual(other.state, "error")
+
+    def test_installment_value_is_not_compared_with_the_total(self):
+        tx = self._transaction(amount=300.0)
+        tx.write({"asaas_installment_id": "ins_9", "asaas_installment_count": 3})
+        tx._process("asaas", {"id": "pay_parc", "status": "CONFIRMED", "value": 100.0,
+                              "installment": "ins_9"})
+        self.assertEqual(tx.state, "done")
 
     # ------------------------------------------------------------------ #
     # Webhook                                                             #
@@ -146,6 +481,27 @@ class TestPaymentAsaas(TransactionCase):
         })
         self.assertEqual(event.state, "done")
         self.assertEqual(tx.state, "done")
+
+    def test_shop_charge_is_not_mirrored_by_the_billing_module(self):
+        """Com o evolars_asaas junto, a cobrança da loja não vira cobrança do financeiro.
+
+        Viraria uma segunda notificação ao comprador e o recebimento lançado duas
+        vezes. Antes, ainda quebrava com billingType UNDEFINED.
+        """
+        if "evolars.asaas.payment" not in self.env:
+            self.skipTest("evolars_asaas não instalado")
+        tx = self._transaction()
+        for event_id, name, status in (("evt_1", "PAYMENT_CREATED", "PENDING"),
+                                       ("evt_2", "PAYMENT_RECEIVED", "RECEIVED")):
+            event = self.env["asaas.webhook.event"].ingest({
+                "id": event_id, "event": name,
+                "payment": {"id": "pay_loja", "status": status, "billingType": "UNDEFINED",
+                            "value": 38.0, "externalReference": tx.reference},
+            })
+            self.assertEqual(event.state, "done", event.error)
+        self.assertEqual(tx.state, "done")
+        self.assertFalse(self.env["evolars.asaas.payment"].search(
+            [("asaas_payment_id", "=", "pay_loja")]))
 
     def test_charge_created_outside_the_shop_is_ignored_not_an_error(self):
         """Cobrança de faturamento ou assinatura não tem transação — é normal."""
