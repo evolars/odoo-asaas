@@ -81,6 +81,18 @@ class TestAsaasClient(TransactionCase):
         self.assertEqual(payload["externalReference"], "odoo-partner-%s" % partner.id)
         self.assertNotIn("phone", payload, "campo vazio não deve ir no corpo")
 
+    def test_customer_abroad_is_a_foreign_payer(self):
+        partner = self.env["res.partner"].create({
+            "name": "Leitora Portuguesa",
+            "vat": "CC 12345678 9 ZZ1",
+            "zip": "1100-148",
+            "country_id": self.env.ref("base.pt").id,
+        })
+        payload = customer_payload(partner)
+        self.assertTrue(payload["foreignCustomer"])
+        self.assertNotIn("cpfCnpj", payload)
+        self.assertNotIn("postalCode", payload, "CEP português não é CEP")
+
     def test_ensure_customer_does_not_call_twice(self):
         partner = self.env["res.partner"].create({"name": "Cliente Asaas"})
         client = AsaasClient("k")

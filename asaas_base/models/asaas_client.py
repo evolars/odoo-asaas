@@ -246,6 +246,14 @@ class AsaasClient:
         return self.create_webhook(payload)
 
 
+def is_foreign_payer(partner):
+    """Pagador de fora do Brasil, que não tem CPF nem CNPJ.
+
+    Sem país, conta como brasileiro: é o caso da maioria dos cadastros antigos.
+    """
+    return bool(partner.country_id) and partner.country_id.code != "BR"
+
+
 def customer_payload(partner, notification_disabled=True):
     """Traduz um `res.partner` para o corpo de /customers.
 
@@ -260,12 +268,19 @@ def customer_payload(partner, notification_disabled=True):
     optional = {
         "email": partner.email,
         "phone": partner.phone,
-        "mobilePhone": partner.mobile,
+        # O 19 tirou o celular do contato (fica só `phone`); módulos podem trazê-lo de volta.
+        "mobilePhone": partner.mobile if "mobile" in partner._fields else False,
         "address": partner.street,
         "complement": partner.street2,
         "city": partner.city,
     }
     payload.update({key: value for key, value in optional.items() if value})
+    if is_foreign_payer(partner):
+        # Estrangeiro entra como `foreignCustomer`, sem CPF/CNPJ. O documento de lá
+        # (passaporte, NIF...), o CEP e o estado não são o que o Asaas valida como
+        # CPF, CEP e UF; mandar faria a API recusar o cliente.
+        payload["foreignCustomer"] = True
+        return payload
     if partner.zip:
         payload["postalCode"] = partner.zip.replace("-", "").replace(".", "")
     if partner.state_id:
@@ -275,6 +290,8 @@ def customer_payload(partner, notification_disabled=True):
     documento = partner.vat
     if "cnpj_cpf_stripped" in partner._fields:
         documento = partner.cnpj_cpf_stripped or partner.vat
+    # Documento informado no pagamento e que não coube no cadastro (repetido em outro contato).
+    documento = documento or partner.env.context.get("asaas_payer_document")
     if documento:
         payload["cpfCnpj"] = "".join(char for char in documento if char.isalnum())
     return payload
