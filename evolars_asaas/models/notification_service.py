@@ -185,7 +185,7 @@ class EvolarsNotificationService:
         results = {"whatsapp": None, "email": None}
 
         if channel in ("whatsapp", "both"):
-            phone = partner.mobile or partner.phone
+            phone = getattr(partner, "mobile", False) or partner.phone
             wa_text = self._build_payment_whatsapp_text(payment, amount_str, due_str, billing_label, event)
             wa_res = self.send_whatsapp(
                 phone_number=phone,
@@ -250,7 +250,7 @@ class EvolarsNotificationService:
         results = {"whatsapp": None, "email": None}
 
         if channel in ("whatsapp", "both"):
-            phone = partner.mobile or partner.phone
+            phone = getattr(partner, "mobile", False) or partner.phone
             wa_text = self._build_subscription_whatsapp_text(subscription, amount_str, due_str, cycle_label, billing_label, event)
             wa_res = self.send_whatsapp(
                 phone_number=phone,

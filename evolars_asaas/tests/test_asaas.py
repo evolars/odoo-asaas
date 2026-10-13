@@ -114,7 +114,8 @@ class TestAsaas(TransactionCase):
         self.assertEqual(str(self.payment.received_date), "2026-08-26")
         self.assertTrue(self.payment.account_payment_id)
         self.assertEqual(self.payment.account_payment_id.amount, 500.0)
-        self.assertEqual(self.payment.account_payment_id.state, "posted")
+        # desde o 18 o pagamento conciliado com a fatura fica "paid"
+        self.assertIn(self.payment.account_payment_id.state, ("posted", "paid"))
         self.assertTrue(self.payment.receipt_sent)
         self.assertEqual(self.payment.resend_email_id, "resend_receipt_uuid_777")
         self.assertTrue(self.payment.receipt_sent_date)
@@ -303,17 +304,30 @@ class TestAsaas(TransactionCase):
         # Recibo não foi marcado como enviado com sucesso
         self.assertFalse(self.payment.receipt_sent)
 
-    def test_internal_user_without_asaas_group_has_no_access(self):
-        """Usuário interno comum não recebe o módulo Asaas automaticamente."""
+    def test_access_only_with_asaas_group(self):
+        """Usuário interno comum não vê o Asaas; quem tem Asaas Usuário vê e cobra."""
         internal_user = self.env["res.users"].create({
             "name": "Operador Interno Evolars",
             "login": "operador.teste@evolars.com.br",
             "email": "operador.teste@evolars.com.br",
-            "groups_id": [(6, 0, [self.env.ref("base.group_user").id])],
+            "group_ids": [(6, 0, [self.env.ref("base.group_user").id])],
         })
+        asaas_user = self.env.ref("evolars_asaas.group_asaas_user")
         self.assertFalse(internal_user.has_group("evolars_asaas.group_asaas_user"))
         with self.assertRaises(AccessError):
             self.env["evolars.asaas.payment"].with_user(internal_user).search([], limit=1)
+        with self.assertRaises(AccessError):
+            self.env["evolars.asaas.webhook.event"].with_user(internal_user).search([], limit=1)
+
+        internal_user.group_ids = [(4, asaas_user.id)]
+        payment_as_user = self.env["evolars.asaas.payment"].with_user(internal_user).create({
+            "name": "Cobrança Criada por Usuário do Asaas",
+            "partner_id": self.partner.id,
+            "amount": 250.0,
+            "billing_type": "PIX",
+            "company_id": self.company.id,
+        })
+        self.assertEqual(payment_as_user.amount, 250.0)
 
     def test_split_constraints_fixed_and_percentage(self):
         """Assegura validação defensiva contra splits inválidos."""
