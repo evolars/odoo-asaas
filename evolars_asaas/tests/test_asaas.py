@@ -570,3 +570,73 @@ class TestAsaas(TransactionCase):
         self.assertEqual(event.payment_id.state, "overdue")
 
 
+
+    # ------------------------------------------------------------------ #
+    # Pagamento de fatura de fornecedor por PIX                           #
+    # ------------------------------------------------------------------ #
+
+    def _vendor_bill(self, amount=500.0):
+        bill = self.env["account.move"].create({
+            "move_type": "in_invoice",
+            "partner_id": self.partner.id,
+            "invoice_date": fields.Date.today(),
+            "invoice_line_ids": [(0, 0, {"name": "Serviço PJ", "quantity": 1, "price_unit": amount})],
+        })
+        bill.action_post()
+        return bill
+
+    def _pay_bill(self, bill, transfer_res):
+        with patch("odoo.addons.evolars_asaas.wizard.asaas_bill_payment_wizard.AsaasAPI.get_balance",
+                   return_value={"balance": 0.0}), \
+             patch("odoo.addons.evolars_asaas.wizard.asaas_bill_payment_wizard.AsaasAPI.transfer_pix",
+                   return_value=transfer_res):
+            wizard = self.env["evolars.asaas.bill.payment.wizard"].with_context(
+                default_move_id=bill.id).create({"pix_key": "41178241807", "pix_key_type": "CPF"})
+            return wizard.action_confirm_payment()
+
+    def test_bill_pix_pending_does_not_mark_paid_until_webhook_done(self):
+        """Transferência aguardando token fica pendente: a fatura só baixa no TRANSFER_DONE."""
+        bill = self._vendor_bill()
+        action = self._pay_bill(bill, {"id": "tr_pend_1", "status": "PENDING", "value": 500.0})
+
+        self.assertEqual(bill.asaas_transfer_id, "tr_pend_1")
+        self.assertEqual(bill.asaas_transfer_status, "PENDING")
+        self.assertEqual(bill.payment_state, "not_paid")
+        self.assertEqual(action["params"]["type"], "warning")
+        self.assertFalse(bill.can_pay_via_asaas)
+
+        self.env["evolars.asaas.webhook.event"].ingest({
+            "id": "evt_tr_done_1",
+            "event": "TRANSFER_DONE",
+            "transfer": {"id": "tr_pend_1", "status": "DONE", "value": 500.0,
+                         "endToEndIdentifier": "E123", "transactionReceiptUrl": "https://example.test/r"},
+        })
+        self.assertEqual(bill.asaas_transfer_status, "DONE")
+        self.assertEqual(bill.asaas_end_to_end_id, "E123")
+        self.assertIn(bill.payment_state, ("paid", "in_payment"))
+
+    def test_bill_pix_done_on_creation_marks_paid(self):
+        bill = self._vendor_bill(200.0)
+        action = self._pay_bill(bill, {"id": "tr_done_2", "status": "DONE", "value": 200.0})
+        self.assertIn(bill.payment_state, ("paid", "in_payment"))
+        self.assertEqual(action["params"]["type"], "success")
+
+    def test_bill_pix_cancelled_frees_bill_for_retry(self):
+        bill = self._vendor_bill(300.0)
+        self._pay_bill(bill, {"id": "tr_cancel_3", "status": "PENDING", "value": 300.0})
+        self.env["evolars.asaas.webhook.event"].ingest({
+            "id": "evt_tr_cancel_3",
+            "event": "TRANSFER_CANCELLED",
+            "transfer": {"id": "tr_cancel_3", "status": "CANCELLED", "value": 300.0},
+        })
+        self.assertFalse(bill.asaas_transfer_id)
+        self.assertEqual(bill.payment_state, "not_paid")
+        self.assertTrue(bill.can_pay_via_asaas)
+
+    def test_bill_pix_refresh_button_applies_remote_status(self):
+        bill = self._vendor_bill(150.0)
+        self._pay_bill(bill, {"id": "tr_ref_4", "status": "PENDING", "value": 150.0})
+        with patch("odoo.addons.evolars_asaas.models.asaas_api.AsaasAPI.get_transfer",
+                   return_value={"id": "tr_ref_4", "status": "DONE", "value": 150.0}):
+            bill.action_asaas_refresh_transfer()
+        self.assertIn(bill.payment_state, ("paid", "in_payment"))

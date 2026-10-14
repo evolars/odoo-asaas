@@ -7,11 +7,16 @@
     <field name="arch" type="xml">
       <xpath expr="//header" position="inside">
         <field name="can_pay_via_asaas" invisible="1"/>
+        <field name="asaas_transfer_id" invisible="1"/>
         <button name="action_pay_via_asaas"
                 type="object"
                 string="Pagar via PIX (Asaas)"
                 class="oe_highlight"
                 invisible="not can_pay_via_asaas"/>
+        <button name="action_asaas_refresh_transfer"
+                type="object"
+                string="Consultar PIX no Asaas"
+                invisible="not asaas_transfer_id or payment_state in ('paid', 'in_payment')"/>
       </xpath>
       <xpath expr="//page[@name='other_info']" position="after">
         <page name="asaas_transfer_info" string="Transferência Asaas" invisible="move_type != 'in_invoice' or not asaas_transfer_id">

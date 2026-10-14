@@ -1,5 +1,7 @@
 import re
 import logging
+
+from markupsafe import Markup
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError
 from ..models.asaas_api import AsaasAPI
@@ -71,7 +73,11 @@ class AsaasBillPaymentWizard(models.TransientModel):
 
         partner = move.partner_id
         if partner:
-            pix_rec = self.env["res.partner.pix"].search([("partner_id", "=", partner.id)], limit=1)
+            # res.partner.pix vem do l10n_br_base, que não é dependência deste módulo.
+            pix_rec = (
+                self.env["res.partner.pix"].search([("partner_id", "=", partner.id)], limit=1)
+                if "res.partner.pix" in self.env else False
+            )
             if pix_rec:
                 res["pix_key"] = pix_rec.key
                 type_map = {
@@ -145,62 +151,39 @@ class AsaasBillPaymentWizard(models.TransientModel):
 
         transfer_id = transfer_res.get("id")
         transfer_status = transfer_res.get("status")
-        end_to_end = transfer_res.get("endToEndIdentifier")
         receipt_url = transfer_res.get("transactionReceiptUrl")
+        move.write({"asaas_transfer_id": transfer_id})
 
-        move.write({
-            "asaas_transfer_id": transfer_id,
-            "asaas_transfer_status": transfer_status,
-            "asaas_end_to_end_id": end_to_end,
-            "asaas_receipt_url": receipt_url,
-        })
+        move.message_post(body=Markup(
+            "<p><strong>PIX enviado ao Asaas</strong></p><ul>"
+            "<li><strong>Valor:</strong> R$ %s</li>"
+            "<li><strong>Chave PIX:</strong> %s (%s)</li>"
+            "<li><strong>ID Asaas:</strong> <code>%s</code></li>"
+            "<li><strong>Referência:</strong> %s</li>"
+            "%s</ul>"
+        ) % (
+            f"{self.amount:,.2f}", self.pix_key, self.pix_key_type, transfer_id,
+            self.external_reference,
+            Markup('<li><a href="%s" target="_blank">Comprovante Asaas</a></li>') % receipt_url if receipt_url else "",
+        ), subtype_xmlid="mail.mt_comment")
 
-        # Conciliação Contábil Automática via account.payment.register
-        journal = self.env["account.journal"].search([
-            ("type", "=", "bank"),
-            ("company_id", "=", move.company_id.id),
-        ], limit=1)
-        if not journal:
-            journal = self.env["account.journal"].browse(6)
-
-        try:
-            pay_wizard = self.env["account.payment.register"].with_context(
-                active_model="account.move",
-                active_ids=[move.id],
-            ).create({
-                "payment_date": fields.Date.context_today(self),
-                "amount": self.amount,
-                "journal_id": journal.id,
-            })
-            pay_wizard.action_create_payments()
-        except Exception as exc:
-            _logger.exception("Falha ao registrar pagamento contábil da fatura %s", move.name)
-            move.message_post(body=_("Transferência Asaas realizada (%s), mas houve erro no registro contábil: %s") % (transfer_id, str(exc)))
-
-
-        receipt_html = f'<a href="{receipt_url}" target="_blank" class="btn btn-sm btn-link">Abrir Comprovante Asaas</a>' if receipt_url else "N/A"
-        body_msg = (
-            f"<p><strong>✅ Pagamento via PIX Asaas Realizado com Sucesso!</strong></p>"
-            f"<ul>"
-            f"<li><strong>Valor:</strong> R$ {self.amount:,.2f}</li>"
-            f"<li><strong>Chave PIX:</strong> {self.pix_key} ({self.pix_key_type})</li>"
-            f"<li><strong>ID Asaas:</strong> <code>{transfer_id}</code></li>"
-            f"<li><strong>Status:</strong> {transfer_status}</li>"
-            f"<li><strong>End-to-End ID:</strong> {end_to_end or 'Em processamento bancário'}</li>"
-            f"<li><strong>Referência Externa:</strong> {self.external_reference}</li>"
-            f"<li><strong>Comprovante:</strong> {receipt_html}</li>"
-            f"</ul>"
+        # A fatura só é baixada quando o Asaas conclui (DONE). Se a conta exigir
+        # autorização por token, a transferência fica pendente e o webhook baixa depois.
+        move._asaas_apply_transfer_status(transfer_res)
+        done = transfer_status == "DONE"
+        message = (
+            _("PIX concluído e fatura baixada.") if done else
+            _("PIX criado no Asaas com status %s. A fatura será baixada quando o Asaas concluir; "
+              "se aparecer um evento crítico pendente no Asaas, autorize com o token.") % transfer_status
         )
-        move.message_post(body=body_msg, subtype_xmlid="mail.mt_comment")
-
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",
             "params": {
-                "title": _("Pagamento Concluído"),
-                "message": _("Transferência PIX enviada via Asaas e fatura baixada com sucesso!"),
-                "type": "success",
-                "sticky": False,
+                "title": _("Pagamento concluído") if done else _("PIX aguardando o Asaas"),
+                "message": message,
+                "type": "success" if done else "warning",
+                "sticky": not done,
                 "next": {"type": "ir.actions.act_window_close"},
             },
         }

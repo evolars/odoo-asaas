@@ -864,10 +864,7 @@ class AsaasWebhookEvent(models.Model):
         if transfer_data.get("id"):
             move = self.env["account.move"].sudo().search([("asaas_transfer_id", "=", transfer_data["id"])], limit=1)
             if move:
-                t_status = transfer_data.get("status")
-                if t_status:
-                    move.sudo().write({"asaas_transfer_status": t_status})
-                move.message_post(body=_("ℹ️ Webhook Asaas: Transferência PIX %s atualizada para status %s.") % (transfer_data["id"], t_status or event_name))
+                move._asaas_apply_transfer_status(transfer_data, event_name)
 
         if bill_data.get("id") or bill_data.get("externalReference"):
             ext_ref = bill_data.get("externalReference")
