@@ -4,4 +4,5 @@
   <menuitem id="menu_asaas_payments" name="Cobranças" parent="menu_asaas_root" action="action_asaas_payments" sequence="10"/>
   <menuitem id="menu_asaas_subscriptions" name="Assinaturas" parent="menu_asaas_root" action="action_asaas_subscriptions" sequence="20"/>
   <menuitem id="menu_asaas_events" name="Eventos de webhook" parent="menu_asaas_root" action="action_asaas_events" sequence="30" groups="evolars_asaas.group_asaas_user"/>
+  <menuitem id="menu_asaas_withdrawal_validations" name="Validações de saque" parent="menu_asaas_root" action="asaas_base.asaas_withdrawal_validation_action" sequence="40" groups="evolars_asaas.group_asaas_manager"/>
 </odoo>

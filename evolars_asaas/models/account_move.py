@@ -29,6 +29,17 @@ class AccountMove(models.Model):
         copy=False,
         readonly=True,
     )
+    asaas_transfer_amount = fields.Monetary(
+        string="Valor enviado ao Asaas",
+        copy=False,
+        readonly=True,
+        help="Valor do PIX pedido pelo Odoo; a validação de saque só aprova esse valor.",
+    )
+    asaas_transfer_pix_key = fields.Char(
+        string="Chave PIX enviada",
+        copy=False,
+        readonly=True,
+    )
     asaas_receipt_url = fields.Char(
         string="Comprovante Asaas",
         copy=False,

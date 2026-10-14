@@ -152,7 +152,11 @@ class AsaasBillPaymentWizard(models.TransientModel):
         transfer_id = transfer_res.get("id")
         transfer_status = transfer_res.get("status")
         receipt_url = transfer_res.get("transactionReceiptUrl")
-        move.write({"asaas_transfer_id": transfer_id})
+        move.write({
+            "asaas_transfer_id": transfer_id,
+            "asaas_transfer_amount": self.amount,
+            "asaas_transfer_pix_key": self.pix_key.strip(),
+        })
 
         move.message_post(body=Markup(
             "<p><strong>PIX enviado ao Asaas</strong></p><ul>"

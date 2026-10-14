@@ -640,3 +640,40 @@ class TestAsaas(TransactionCase):
                    return_value={"id": "tr_ref_4", "status": "DONE", "value": 150.0}):
             bill.action_asaas_refresh_transfer()
         self.assertIn(bill.payment_state, ("paid", "in_payment"))
+
+    # ------------------------------------------------------------------ #
+    # Validação de saque                                                  #
+    # ------------------------------------------------------------------ #
+
+    def _validate(self, transfer, operation="TRANSFER"):
+        return self.env["asaas.withdrawal.validation"].evaluate({"type": operation, "transfer": transfer})
+
+    def test_withdrawal_approves_only_the_transfer_odoo_requested(self):
+        bill = self._vendor_bill(500.0)
+        self._pay_bill(bill, {"id": "tr_val_1", "status": "PENDING", "value": 500.0})
+        self.assertEqual(bill.asaas_transfer_amount, 500.0)
+        self.assertEqual(bill.asaas_transfer_pix_key, "41178241807")
+
+        ok = self._validate({"id": "tr_val_1", "value": 500.0,
+                             "bankAccount": {"pixAddressKey": "411.782.418-07"}})
+        self.assertEqual(ok.decision, "approved")
+        self.assertEqual((ok.res_model, ok.res_id), ("account.move", bill.id))
+
+        self.assertEqual(self._validate({"id": "tr_val_1", "value": 900.0}).decision, "refused")
+        wrong_key = self._validate({"id": "tr_val_1", "value": 500.0,
+                                    "bankAccount": {"pixAddressKey": "outra@chave.com"}})
+        self.assertEqual(wrong_key.decision, "refused")
+        self.assertEqual(self._validate({"id": "tr_desconhecida", "value": 500.0}).decision, "refused")
+
+    def test_withdrawal_refuses_paid_bill_and_other_operations(self):
+        bill = self._vendor_bill(200.0)
+        self._pay_bill(bill, {"id": "tr_val_2", "status": "DONE", "value": 200.0})
+        self.assertEqual(self._validate({"id": "tr_val_2", "value": 200.0}).decision, "refused")
+        other = self.env["asaas.withdrawal.validation"].evaluate(
+            {"type": "BILL", "bill": {"id": "bill_1", "value": 50.0}})
+        self.assertEqual(other.decision, "refused")
+
+    def test_withdrawal_asks_retry_while_bill_is_still_saving(self):
+        bill = self._vendor_bill(300.0)
+        res = self._validate({"id": "tr_val_3", "value": 300.0, "externalReference": bill.name})
+        self.assertEqual(res.decision, "retry")

@@ -1,3 +1,5 @@
+import secrets
+
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError
 
@@ -43,6 +45,11 @@ class AsaasConfig(models.AbstractModel):
         base = (self.get_param("web.base.url") or "").rstrip("/")
         return "%s/asaas/webhook" % base
 
+    @api.model
+    def withdrawal_url(self):
+        base = (self.get_param("web.base.url") or "").rstrip("/")
+        return "%s/asaas/withdrawal" % base
+
 
 class ResConfigSettings(models.TransientModel):
     _inherit = "res.config.settings"
@@ -66,6 +73,28 @@ class ResConfigSettings(models.TransientModel):
         help="Segredo combinado com o Asaas. Chega em cada evento no cabeçalho "
              "asaas-access-token e é o que distingue um evento legítimo de um forjado.",
     )
+
+    asaas_withdrawal_token = fields.Char(
+        string="Token da validação de saque",
+        config_parameter="asaas.withdrawal_token",
+        groups="base.group_system",
+        help="Segredo do endereço que aprova saques. Vai no campo token da tela "
+             "Mecanismos de segurança do Asaas.",
+    )
+    asaas_withdrawal_url = fields.Char(
+        string="Endereço da validação de saque",
+        compute="_compute_asaas_withdrawal_url",
+    )
+
+    def _compute_asaas_withdrawal_url(self):
+        for settings in self:
+            settings.asaas_withdrawal_url = self.env["asaas.config"].withdrawal_url()
+
+    def action_asaas_generate_withdrawal_token(self):
+        self.ensure_one()
+        self.env["ir.config_parameter"].sudo().set_param(
+            "asaas.withdrawal_token", secrets.token_urlsafe(48))
+        return {"type": "ir.actions.client", "tag": "reload"}
 
     def action_asaas_test_connection(self):
         self.ensure_one()

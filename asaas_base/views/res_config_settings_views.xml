@@ -30,6 +30,17 @@
                             </div>
                         </setting>
                     </block>
+                    <block title="Validação de saque" name="asaas_withdrawal">
+                        <setting string="Endereço e token"
+                                 help="Cadastre os dois em Asaas → Integrações → Mecanismos de segurança. O Odoo só aprova o que ele mesmo mandou pagar.">
+                            <field name="asaas_withdrawal_url" readonly="1" widget="CopyClipboardChar"/>
+                            <field name="asaas_withdrawal_token" widget="CopyClipboardChar"/>
+                            <div class="mt-2">
+                                <button name="action_asaas_generate_withdrawal_token" type="object"
+                                        string="Gerar token" class="btn-link" icon="fa-key"/>
+                            </div>
+                        </setting>
+                    </block>
                 </app>
             </xpath>
         </field>
@@ -75,11 +86,73 @@
         <field name="view_mode">list,form</field>
     </record>
 
+    <record id="asaas_withdrawal_validation_view_tree" model="ir.ui.view">
+        <field name="name">asaas.withdrawal.validation.tree</field>
+        <field name="model">asaas.withdrawal.validation</field>
+        <field name="arch" type="xml">
+            <list string="Validações de saque" create="false" edit="false">
+                <field name="create_date" string="Recebido em"/>
+                <field name="name"/>
+                <field name="asaas_id"/>
+                <field name="value" sum="Total"/>
+                <field name="decision" widget="badge"
+                       decoration-success="decision == 'approved'"
+                       decoration-warning="decision == 'retry'"
+                       decoration-danger="decision == 'refused'"/>
+                <field name="reason"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="asaas_withdrawal_validation_view_form" model="ir.ui.view">
+        <field name="name">asaas.withdrawal.validation.form</field>
+        <field name="model">asaas.withdrawal.validation</field>
+        <field name="arch" type="xml">
+            <form string="Validação de saque" create="false" edit="false">
+                <header>
+                    <button name="action_open_record" type="object" string="Abrir registro"
+                            invisible="not res_id"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="name"/>
+                            <field name="operation_type" invisible="name"/>
+                            <field name="asaas_id"/>
+                            <field name="value"/>
+                        </group>
+                        <group>
+                            <field name="decision"/>
+                            <field name="reason"/>
+                            <field name="create_date" string="Recebido em"/>
+                            <field name="res_model" invisible="1"/>
+                            <field name="res_id" invisible="1"/>
+                        </group>
+                    </group>
+                    <field name="payload" widget="ace" options="{'mode': 'json'}"/>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="asaas_withdrawal_validation_action" model="ir.actions.act_window">
+        <field name="name">Validações de saque</field>
+        <field name="res_model">asaas.withdrawal.validation</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
     <menuitem id="menu_asaas_webhook_event"
               name="Eventos do Asaas"
               parent="base.menu_administration"
               action="asaas_webhook_event_action"
               groups="base.group_system"
               sequence="90"/>
+
+    <menuitem id="menu_asaas_withdrawal_validation"
+              name="Validações de saque do Asaas"
+              parent="base.menu_administration"
+              action="asaas_withdrawal_validation_action"
+              groups="base.group_system"
+              sequence="91"/>
 
 </odoo>

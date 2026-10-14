@@ -8,3 +8,4 @@ from . import res_config_settings
 from . import res_partner
 from . import account_move
 from . import asaas_webhook_event_bridge
+from . import asaas_withdrawal_validation
