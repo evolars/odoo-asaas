@@ -176,6 +176,24 @@ entrada e a autenticação são únicas.
 Depende do `contract` da OCA para as assinaturas: `evolars.asaas.subscription.contract_id` é
 obrigatório.
 
+### Splits recebidos
+
+Quando outra conta Asaas repassa parte das cobranças dela para esta (split), o Asaas não manda
+webhook para quem recebe: a comissão só aparece em `GET /payments/splits/received` e no extrato,
+como `INTERNAL_TRANSFER_CREDIT`. O cron *Asaas: faturar splits recebidos* (de hora em hora) lê essa
+lista e cria uma fatura de cliente por split, já paga no diário do Asaas na data do crédito
+(`account.move.asaas_split_id`, único por empresa).
+
+- Só entram splits de contas ligadas a um contato: campo *Conta Asaas (splits recebidos)* no
+  contato (o `originAccountId` do split). Sem nenhum contato ligado, o cron nem chama a API.
+- Só o que caiu na conta (`DONE`). Pendente vira fatura no dia do crédito; cancelado é ignorado.
+  Split estornado depois de faturado ganha nota de crédito paga.
+- A linha usa o produto *Comissão de parceiro (split Asaas)*, sem impostos. A conta de receita é
+  a do produto: configure na base.
+- A leitura recomeça 7 dias antes do último crédito (`evolars_asaas.received_split_since`).
+  `account.move.asaas_sync_received_splits(since="2026-01-01", limit=200)` refaz um período e
+  devolve quantos splits ficaram para a próxima rodada.
+
 ---
 
 ## Sandbox
@@ -227,7 +245,7 @@ docker run --rm --network <rede> -v "$PWD":/mnt/extra-addons:ro \
 ```
 
 Para incluir o `evolars_asaas` é preciso ter o `contract` da OCA no `--addons-path`.
-São **54 testes** sem o `evolars_asaas` (11 do base, 42 do provedor, 1 da loja) e 73 com ele.
+São **54 testes** sem o `evolars_asaas` (11 do base, 42 do provedor, 1 da loja); o `evolars_asaas` tem 32.
 
 Nenhum teste toca a rede: as chamadas são interceptadas. Cobrem o envio das credenciais e do
 `User-Agent`, tradução de erro da API, o corpo enviado ao criar a cobrança, o mapeamento de

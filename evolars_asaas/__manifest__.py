@@ -1,7 +1,7 @@
 {
     "name": "Evolars Asaas",
     "summary": "Cobranças, recebimentos, splits e assinaturas Asaas",
-    "version": "19.0.1.2.0",
+    "version": "19.0.1.3.0",
     "license": "AGPL-3",
     "author": "Evolars LTDA",
     "website": "https://evolars.com.br",
@@ -10,6 +10,7 @@
     "data": [
         "security/evolars_asaas_security.xml",
         "security/ir.model.access.csv",
+        "data/asaas_received_split_data.xml",
         "wizard/asaas_payment_refund_wizard_views.xml",
         "wizard/asaas_bill_payment_wizard_views.xml",
         "views/res_config_settings_views.xml",

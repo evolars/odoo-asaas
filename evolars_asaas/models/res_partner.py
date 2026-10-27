@@ -18,6 +18,11 @@ class ResPartner(models.Model):
         required=True,
         tracking=True,
     )
+    asaas_account_id = fields.Char(
+        string="Conta Asaas (splits recebidos)",
+        copy=False,
+        help="ID da conta Asaas deste parceiro. Os splits que ela repassar viram faturas dele, já pagas.",
+    )
     asaas_payment_ids = fields.One2many("evolars.asaas.payment", "partner_id", string="Cobranças Asaas")
     asaas_subscription_ids = fields.One2many("evolars.asaas.subscription", "partner_id", string="Assinaturas Asaas")
     asaas_payment_count = fields.Integer(compute="_compute_asaas_counts")

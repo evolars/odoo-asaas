@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <!-- noupdate: a conta de receita é escolhida na base, no próprio produto -->
+  <data noupdate="1">
+    <record id="product_asaas_received_split" model="product.product">
+      <field name="name">Comissão de parceiro (split Asaas)</field>
+      <field name="default_code">ASAAS-SPLIT</field>
+      <field name="type">service</field>
+      <field name="sale_ok" eval="True"/>
+      <field name="purchase_ok" eval="False"/>
+      <field name="taxes_id" eval="[Command.clear()]"/>
+    </record>
+
+    <record id="ir_cron_asaas_received_splits" model="ir.cron">
+      <field name="name">Asaas: faturar splits recebidos</field>
+      <field name="model_id" ref="account.model_account_move"/>
+      <field name="state">code</field>
+      <field name="code">model._cron_asaas_sync_received_splits()</field>
+      <field name="interval_number">1</field>
+      <field name="interval_type">hours</field>
+    </record>
+  </data>
+</odoo>

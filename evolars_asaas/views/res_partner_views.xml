@@ -20,6 +20,7 @@
       </div>
       <xpath expr="//field[@name='vat']" position="after">
         <field name="notification_channel" widget="radio" options="{'horizontal': true}"/>
+        <field name="asaas_account_id" groups="evolars_asaas.group_asaas_manager"/>
       </xpath>
     </field>
   </record>
